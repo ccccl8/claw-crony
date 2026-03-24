@@ -201,8 +201,45 @@ export async function runHubRegistration(
         };
       }
     } catch {
-      // Hub unreachable or agent not found — will re-register
-      api.logger.warn("a2a-gateway: existing registration invalid, will re-register");
+      // Hub unreachable or agent not found — try re-registering with existing token first
+      api.logger.warn("a2a-gateway: existing registration invalid, trying with existing token");
+      const existingToken = existing.token;
+
+      try {
+        const existingPayload: CreateAgentPayload = {
+          name: config.agentCard.name,
+          description: config.agentCard.description ?? "",
+          skills: flattenSkills(config.agentCard.skills),
+          address,
+          token: existingToken,
+          username: registrationConfig.username ?? config.agentCard.name,
+          email: registrationConfig.email ?? "",
+        };
+
+        const agent = await retryWithBackoff(
+          () => registerWithHub(hubUrl, existingPayload),
+          3,
+          1000,
+          10000,
+        );
+        api.logger.info(`a2a-gateway: re-registered with hub using existing token (agentId=${agent.id})`);
+        // Re-save to update registration file
+        const updatedData: HubRegistrationData = {
+          ...existing,
+          registeredAt: new Date().toISOString(),
+        };
+        saveRegistration(configDir, updatedData);
+        return { agentId: agent.id, token: existingToken, address, name: config.agentCard.name };
+      } catch (err: unknown) {
+        // Existing token also failed (409 means address conflict from elsewhere)
+        const status = typeof err === "object" && err !== null ? (err as { status?: number }).status : undefined;
+        if (status === 409) {
+          api.logger.warn("a2a-gateway: existing token rejected, generating new token");
+        } else {
+          api.logger.warn(`a2a-gateway: re-registration with existing token failed — ${err instanceof Error ? err.message : String(err)}`);
+        }
+        // fall through to generate new token
+      }
     }
   }
 
