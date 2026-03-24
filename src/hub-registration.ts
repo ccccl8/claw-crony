@@ -177,7 +177,20 @@ export async function runHubRegistration(
 ): Promise<HubRegistration | null> {
   const configDir = getConfigDir();
   const hubUrl = hubConfig.url;
-  const address = `${config.server.host}:${config.server.port}`;
+
+  // Derive address from agentCard.url (the externally reachable address), not server.bind
+  // e.g. "http://100.10.10.1:18800/a2a/jsonrpc" -> "100.10.10.1:18800"
+  let address: string;
+  if (config.agentCard.url) {
+    try {
+      const urlObj = new URL(config.agentCard.url);
+      address = `${urlObj.hostname}:${urlObj.port || (urlObj.protocol === "https:" ? 443 : 80)}`;
+    } catch {
+      address = `${config.server.host}:${config.server.port}`;
+    }
+  } else {
+    address = `${config.server.host}:${config.server.port}`;
+  }
 
   // Ensure config directory exists
   if (!fs.existsSync(configDir)) {
