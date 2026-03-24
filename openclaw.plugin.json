@@ -1,0 +1,272 @@
+{
+  "id": "claw-crony",
+  "name": "Claw Crony",
+  "description": "OpenClaw A2A v0.3.0 gateway with Agent Card, JSON-RPC, REST, routing rules, transport fallback, and Hub matchmaking",
+  "version": "1.0.1",
+  "defaultConfig": {
+    "agentCard": {
+      "name": "OpenClaw A2A Gateway",
+      "description": "A2A bridge for OpenClaw agents",
+      "skills": [{ "id": "chat", "name": "chat", "description": "Chat bridge" }]
+    },
+    "hub": {
+      "url": "https://www.factormining.cn",
+      "enabled": true,
+      "registrationEnabled": true
+    }
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "agentCard": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": { "type": "string" },
+          "description": { "type": "string" },
+          "url": { "type": "string" },
+          "skills": {
+            "type": "array",
+            "items": {
+              "oneOf": [
+                { "type": "string" },
+                {
+                  "type": "object",
+                  "properties": {
+                    "id": { "type": "string" },
+                    "name": { "type": "string" },
+                    "description": { "type": "string" }
+                  },
+                  "required": ["name"]
+                }
+              ]
+            }
+          }
+        }
+      },
+      "hub": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "url": { "type": "string" },
+          "enabled": { "type": "boolean", "default": true },
+          "registrationEnabled": { "type": "boolean", "default": true }
+        }
+      },
+      "registration": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "username": { "type": "string" },
+          "email": { "type": "string" }
+        }
+      },
+      "server": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "host": { "type": "string", "default": "0.0.0.0" },
+          "port": { "type": "number", "default": 18800 }
+        }
+      },
+      "storage": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "tasksDir": { "type": "string", "default": "~/.openclaw/a2a-tasks" },
+          "taskTtlHours": {
+            "type": "number",
+            "default": 72,
+            "minimum": 1,
+            "description": "Hours before completed/failed/canceled tasks are automatically deleted (default 72h)"
+          },
+          "cleanupIntervalMinutes": {
+            "type": "number",
+            "default": 60,
+            "minimum": 1,
+            "description": "Minutes between automatic task cleanup runs (default 60min)"
+          }
+        }
+      },
+      "peers": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "name": { "type": "string" },
+            "agentCardUrl": { "type": "string" },
+            "auth": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "enum": ["bearer", "apiKey"]
+                },
+                "token": { "type": "string" }
+              },
+              "required": ["type", "token"]
+            }
+          },
+          "required": ["name", "agentCardUrl"]
+        }
+      },
+      "security": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "inboundAuth": {
+            "type": "string",
+            "enum": ["none", "bearer"],
+            "default": "none"
+          },
+          "token": { "type": "string" },
+          "tokens": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Multiple tokens for zero-downtime rotation. Used alongside or instead of 'token'."
+          },
+          "allowedMimeTypes": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Allowed MIME type patterns for file transfer (e.g. \"image/*\", \"application/pdf\")"
+          },
+          "maxFileSizeBytes": {
+            "type": "number",
+            "default": 52428800,
+            "minimum": 0,
+            "description": "Max file size in bytes for URI-based files (default 50MB)"
+          },
+          "maxInlineFileSizeBytes": {
+            "type": "number",
+            "default": 10485760,
+            "minimum": 0,
+            "description": "Max file size in bytes for inline base64 files (default 10MB)"
+          },
+          "fileUriAllowlist": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "URI hostname allowlist patterns (e.g. \"*.example.com\"). Empty allows all public hosts."
+          }
+        }
+      },
+      "routing": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "defaultAgentId": {
+            "type": "string",
+            "default": "default"
+          },
+          "rules": {
+            "type": "array",
+            "description": "Rule-based routing: auto-select peer by message text regex, tags, or required skills"
+          }
+        }
+      },
+      "limits": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "maxConcurrentTasks": {
+            "type": "number",
+            "default": 4,
+            "minimum": 1
+          },
+          "maxQueuedTasks": {
+            "type": "number",
+            "default": 100,
+            "minimum": 0
+          }
+        }
+      },
+      "observability": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "structuredLogs": {
+            "type": "boolean",
+            "default": true
+          },
+          "exposeMetricsEndpoint": {
+            "type": "boolean",
+            "default": true
+          },
+          "metricsPath": {
+            "type": "string",
+            "default": "/a2a/metrics"
+          },
+          "metricsAuth": {
+            "type": "string",
+            "enum": ["none", "bearer"],
+            "default": "none",
+            "description": "Authentication for the metrics endpoint. When set to 'bearer', reuses security.token/tokens."
+          },
+          "auditLogPath": {
+            "type": "string",
+            "default": "~/.openclaw/a2a-audit.jsonl",
+            "description": "Path for the JSONL audit log file (separate from structured logs)."
+          }
+        }
+      },
+      "timeouts": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "agentResponseTimeoutMs": {
+            "type": "number",
+            "default": 300000,
+            "minimum": 1000
+          }
+        }
+      },
+      "resilience": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "healthCheck": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "enabled": { "type": "boolean", "default": true },
+              "intervalMs": { "type": "number", "default": 30000, "minimum": 1000 },
+              "timeoutMs": { "type": "number", "default": 5000, "minimum": 500 }
+            }
+          },
+          "retry": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "maxRetries": { "type": "number", "default": 3, "minimum": 0 },
+              "baseDelayMs": { "type": "number", "default": 1000, "minimum": 100 },
+              "maxDelayMs": { "type": "number", "default": 10000, "minimum": 100 }
+            }
+          },
+          "circuitBreaker": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "failureThreshold": { "type": "number", "default": 5, "minimum": 1 },
+              "resetTimeoutMs": { "type": "number", "default": 30000, "minimum": 1000 }
+            }
+          }
+        }
+      }
+    }
+  },
+  "uiHints": {
+    "peers": {
+      "items": {
+        "auth": {
+          "token": { "sensitive": true }
+        }
+      }
+    },
+    "security": {
+      "token": { "sensitive": true },
+      "tokens": { "items": { "sensitive": true } }
+    }
+  }
+}
