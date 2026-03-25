@@ -1,6 +1,6 @@
 {
   "name": "claw-crony",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "type": "module",
   "description": "OpenClaw A2A gateway plugin implementing the A2A v0.3.0 protocol surface",
   "main": "index.ts",
