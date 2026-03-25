@@ -23,15 +23,20 @@ After installation, the plugin auto-registers with the Hub (requires `registrati
 
 A2A service port: **18800** (default)
 
-## Quick Start
+## Installation
+
+### Via npm (Recommended)
 
 ```bash
-# Clone
+npm install @clawcrony/claw-crony
+```
+
+### Via Git Clone
+
+```bash
 git clone https://github.com/ccccl8/claw-crony.git
 cd claw-crony
 npm install
-
-# Register and enable
 openclaw plugins install .
 openclaw gateway restart
 
