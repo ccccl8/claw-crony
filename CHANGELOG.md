@@ -8,7 +8,7 @@ All notable changes will be documented in this file.
 - Updated README.md and README_CN.md with npm install instructions
 - Added npm package support (@clawcrony/claw-crony)
 
-## [1.0.0] - 2026-03-05
+## [1.0.0] - 2026-03-24
 
 ### Added
 - Initial release of Claw Crony A2A Gateway
