@@ -695,7 +695,7 @@ class GatewayRpcConnection {
       maxProtocol: 3,
       client: {
         id: "cli",
-        version: "a2a-gateway-plugin",
+        version: "claw-crony-plugin",
         platform: process.platform,
         mode: "cli",
         instanceId: uuidv4(),
@@ -711,7 +711,7 @@ class GatewayRpcConnection {
     // Build device identity so the gateway preserves requested scopes.
     // Without this, OpenClaw ≥2026.3.13 clears scopes for connections
     // that lack a device identity, causing "missing scope: operator.write".
-    // See: https://github.com/win4r/openclaw-a2a-gateway/issues/29
+    // See: https://github.com/win4r/openclaw-claw-crony/issues/29
     const nonce = this.challengeNonce;
     if (includeDevice && nonce) {
       const identity = getOrCreateDeviceIdentity();
@@ -883,7 +883,7 @@ export class OpenClawAgentExecutor implements AgentExecutor {
     // Validate inbound FileParts before dispatching to the agent
     const fileValidationError = this.validateInboundFileParts(requestContext.userMessage);
     if (fileValidationError) {
-      this.api.logger.warn(`a2a-gateway: inbound file validation failed: ${fileValidationError}`);
+      this.api.logger.warn(`claw-crony: inbound file validation failed: ${fileValidationError}`);
       const rejectedMessage: Message = {
         kind: "message",
         messageId: uuidv4(),
@@ -931,7 +931,7 @@ export class OpenClawAgentExecutor implements AgentExecutor {
       clearInterval(heartbeat);
       const errorMessage = err instanceof Error ? err.message : String(err);
       const truncatedError = errorMessage.length > 500 ? errorMessage.slice(0, 500) + "..." : errorMessage;
-      this.api.logger.error(`a2a-gateway: agent dispatch failed: ${truncatedError}`);
+      this.api.logger.error(`claw-crony: agent dispatch failed: ${truncatedError}`);
       await this.tryHooksWakeFallback(agentId, taskId, contextId, requestContext.userMessage);
 
       // Return failed task status so the caller knows dispatch did not succeed.
@@ -1003,7 +1003,7 @@ export class OpenClawAgentExecutor implements AgentExecutor {
     const contextId = this.taskContextByTaskId.get(taskId);
     if (!contextId) {
       this.api.logger.warn(
-        `a2a-gateway: cancelTask missing contextId for task ${taskId}; skipping cancel publish`,
+        `claw-crony: cancelTask missing contextId for task ${taskId}; skipping cancel publish`,
       );
       eventBus.finished();
       return;
@@ -1219,7 +1219,7 @@ export class OpenClawAgentExecutor implements AgentExecutor {
       });
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
-      this.api.logger.warn(`a2a-gateway: hooks/wake fallback failed (${message})`);
+      this.api.logger.warn(`claw-crony: hooks/wake fallback failed (${message})`);
     }
   }
 }

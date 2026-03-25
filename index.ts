@@ -277,8 +277,8 @@ function normalizeCardPath(): string {
 }
 
 const plugin = {
-  id: "a2a-gateway",
-  name: "A2A Gateway",
+  id: "claw-crony",
+  name: "Claw Crony",
   description: "OpenClaw plugin that serves A2A v0.3.0 endpoints",
 
   register(api: OpenClawPluginApi) {
@@ -711,12 +711,12 @@ const plugin = {
     }
 
     if (!api.registerService) {
-      api.logger.warn("a2a-gateway: registerService is unavailable; HTTP endpoints are not started");
+      api.logger.warn("claw-crony: registerService is unavailable; HTTP endpoints are not started");
       return;
     }
 
     api.registerService({
-      id: "a2a-gateway",
+      id: "claw-crony",
       async start(_ctx) {
         if (server) {
           return;
@@ -727,10 +727,10 @@ const plugin = {
           try {
             const reg = await runHubRegistration(api, config, config.hub, config.registration ?? {});
             if (reg) {
-              api.logger.info(`a2a-gateway: registered with hub (agentId=${reg.agentId})`);
+              api.logger.info(`claw-crony: registered with hub (agentId=${reg.agentId})`);
             }
           } catch (err) {
-            api.logger.warn(`a2a-gateway: hub registration failed — ${err instanceof Error ? err.message : String(err)}`);
+            api.logger.warn(`claw-crony: hub registration failed — ${err instanceof Error ? err.message : String(err)}`);
             // Continue startup anyway — hub is optional
           }
         }
@@ -742,10 +742,10 @@ const plugin = {
         await new Promise<void>((resolve, reject) => {
           server = app.listen(config.server.port, config.server.host, () => {
             api.logger.info(
-              `a2a-gateway: HTTP listening on ${config.server.host}:${config.server.port}`
+              `claw-crony: HTTP listening on ${config.server.host}:${config.server.port}`
             );
             api.logger.info(
-              `a2a-gateway: durable task store at ${config.storage.tasksDir}; concurrency=${config.limits.maxConcurrentTasks}; queue=${config.limits.maxQueuedTasks}`
+              `claw-crony: durable task store at ${config.storage.tasksDir}; concurrency=${config.limits.maxConcurrentTasks}; queue=${config.limits.maxQueuedTasks}`
             );
             resolve();
           });
@@ -786,7 +786,7 @@ const plugin = {
               ServerCredentials.createInsecure(),
               (error) => {
                 if (error) {
-                  api.logger.warn(`a2a-gateway: gRPC failed to start: ${error.message}`);
+                  api.logger.warn(`claw-crony: gRPC failed to start: ${error.message}`);
                   grpcServer = null;
                   resolve(); // Non-fatal: HTTP still works
                   return;
@@ -797,7 +797,7 @@ const plugin = {
                   // ignore: some grpc-js versions auto-start
                 }
                 api.logger.info(
-                  `a2a-gateway: gRPC listening on ${config.server.host}:${grpcPort}`
+                  `claw-crony: gRPC listening on ${config.server.host}:${grpcPort}`
                 );
                 resolve();
               }
@@ -805,7 +805,7 @@ const plugin = {
           });
         } catch (grpcError: unknown) {
           const msg = grpcError instanceof Error ? grpcError.message : String(grpcError);
-          api.logger.warn(`a2a-gateway: gRPC init failed: ${msg}`);
+          api.logger.warn(`claw-crony: gRPC init failed: ${msg}`);
           grpcServer = null;
         }
 
@@ -822,7 +822,7 @@ const plugin = {
         cleanupTimer = setInterval(doCleanup, intervalMs);
 
         api.logger.info(
-          `a2a-gateway: task cleanup enabled — ttl=${config.storage.taskTtlHours}h interval=${config.storage.cleanupIntervalMinutes}min`,
+          `claw-crony: task cleanup enabled — ttl=${config.storage.taskTtlHours}h interval=${config.storage.cleanupIntervalMinutes}min`,
         );
       },
       async stop(_ctx) {

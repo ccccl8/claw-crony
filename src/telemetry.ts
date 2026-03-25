@@ -319,7 +319,7 @@ export class GatewayTelemetry {
 
     const payload = JSON.stringify({
       ts: new Date().toISOString(),
-      component: "a2a-gateway",
+      component: "claw-crony",
       event,
       ...details,
     });

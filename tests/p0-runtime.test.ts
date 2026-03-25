@@ -86,7 +86,7 @@ function makeRequestContext(taskId: string) {
 
 describe("P0 runtime components", () => {
   it("FileTaskStore persists tasks across instances", async () => {
-    const tasksDir = await mkdtemp(path.join(os.tmpdir(), "a2a-gateway-task-store-"));
+    const tasksDir = await mkdtemp(path.join(os.tmpdir(), "claw-crony-task-store-"));
 
     try {
       const writer = new FileTaskStore(tasksDir);

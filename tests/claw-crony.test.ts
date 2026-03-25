@@ -102,7 +102,7 @@ describe("session key format (PR #9, issue #8)", () => {
   });
 });
 
-describe("a2a-gateway plugin", () => {
+describe("claw-crony plugin", () => {
   it("builds an Agent Card with protocolVersion 0.3.0 and required fields", async () => {
     const payload = buildAgentCard(makeConfig() as unknown as GatewayConfig) as Record<string, unknown>;
     assert.equal(payload.protocolVersion, "0.3.0");

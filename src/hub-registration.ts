@@ -1,5 +1,5 @@
 /**
- * Hub registration module for openclaw-a2a-gateway.
+ * Hub registration module for openclaw-claw-crony.
  *
  * Handles automatic registration of the gateway with the hub server on first startup,
  * token generation, and idempotent re-registration.
@@ -205,7 +205,7 @@ export async function runHubRegistration(
     try {
       const agent = await lookupAgentByAddress(hubUrl, address);
       if (agent && agent.id === existing.agentId) {
-        api.logger.info(`a2a-gateway: using existing hub registration (agentId=${existing.agentId})`);
+        api.logger.info(`claw-crony: using existing hub registration (agentId=${existing.agentId})`);
         return {
           agentId: existing.agentId,
           token: existing.token,
@@ -215,7 +215,7 @@ export async function runHubRegistration(
       }
     } catch {
       // Hub unreachable or agent not found — try re-registering with existing token first
-      api.logger.warn("a2a-gateway: existing registration invalid, trying with existing token");
+      api.logger.warn("claw-crony: existing registration invalid, trying with existing token");
       const existingToken = existing.token;
 
       try {
@@ -235,7 +235,7 @@ export async function runHubRegistration(
           1000,
           10000,
         );
-        api.logger.info(`a2a-gateway: re-registered with hub using existing token (agentId=${agent.id})`);
+        api.logger.info(`claw-crony: re-registered with hub using existing token (agentId=${agent.id})`);
         // Re-save to update registration file
         const updatedData: HubRegistrationData = {
           ...existing,
@@ -247,9 +247,9 @@ export async function runHubRegistration(
         // Existing token also failed (409 means address conflict from elsewhere)
         const status = typeof err === "object" && err !== null ? (err as { status?: number }).status : undefined;
         if (status === 409) {
-          api.logger.warn("a2a-gateway: existing token rejected, generating new token");
+          api.logger.warn("claw-crony: existing token rejected, generating new token");
         } else {
-          api.logger.warn(`a2a-gateway: re-registration with existing token failed — ${err instanceof Error ? err.message : String(err)}`);
+          api.logger.warn(`claw-crony: re-registration with existing token failed — ${err instanceof Error ? err.message : String(err)}`);
         }
         // fall through to generate new token
       }
@@ -284,7 +284,7 @@ export async function runHubRegistration(
       10000,
     );
     agentId = agent.id;
-    api.logger.info(`a2a-gateway: registered with hub (agentId=${agentId})`);
+    api.logger.info(`claw-crony: registered with hub (agentId=${agentId})`);
   } catch (err: unknown) {
     // 409 Conflict: address already registered by someone else — try to find our agentId
     if (typeof err === "object" && err !== null && (err as { status?: number }).status === 409) {
@@ -292,17 +292,17 @@ export async function runHubRegistration(
         const existingAgent = await lookupAgentByAddress(hubUrl, address);
         if (existingAgent) {
           agentId = existingAgent.id;
-          api.logger.info(`a2a-gateway: found existing registration (agentId=${agentId})`);
+          api.logger.info(`claw-crony: found existing registration (agentId=${agentId})`);
         } else {
-          api.logger.error("a2a-gateway: address conflict but could not find existing agent");
+          api.logger.error("claw-crony: address conflict but could not find existing agent");
           return null;
         }
       } catch {
-        api.logger.error("a2a-gateway: address conflict and hub lookup failed");
+        api.logger.error("claw-crony: address conflict and hub lookup failed");
         return null;
       }
     } else {
-      api.logger.warn(`a2a-gateway: hub registration failed — ${err instanceof Error ? err.message : String(err)}`);
+      api.logger.warn(`claw-crony: hub registration failed — ${err instanceof Error ? err.message : String(err)}`);
       return null;
     }
   }
@@ -323,7 +323,7 @@ export async function runHubRegistration(
   try {
     saveRegistration(configDir, registrationData);
   } catch (saveErr) {
-    api.logger.warn(`a2a-gateway: failed to save registration file — ${saveErr instanceof Error ? saveErr.message : String(saveErr)}`);
+    api.logger.warn(`claw-crony: failed to save registration file — ${saveErr instanceof Error ? saveErr.message : String(saveErr)}`);
   }
 
   return { agentId, token, address, name };

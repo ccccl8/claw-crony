@@ -273,7 +273,7 @@ describe("history preservation across rounds", () => {
 
 describe("FileTaskStore multi-round persistence", () => {
   it("keeps the latest saved task state after multiple saves", async () => {
-    const tasksDir = await mkdtemp(path.join(os.tmpdir(), "a2a-gateway-multi-round-"));
+    const tasksDir = await mkdtemp(path.join(os.tmpdir(), "claw-crony-multi-round-"));
 
     try {
       const store = new FileTaskStore(tasksDir);

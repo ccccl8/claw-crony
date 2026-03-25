@@ -228,7 +228,7 @@ export function registerPlugin(config: Record<string, unknown>) {
     registerProvider: () => {},
     registerCommand: () => {},
     resolvePath: (p: string) => p,
-    id: "a2a-gateway",
+    id: "claw-crony",
     name: "A2A Gateway",
     source: "test",
   } as any);

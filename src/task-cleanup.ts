@@ -40,7 +40,7 @@ export async function runTaskCleanup(
       taskIds = await store.listAll();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      logger.warn(`a2a-gateway: task cleanup failed to list tasks: ${msg}`);
+      logger.warn(`claw-crony: task cleanup failed to list tasks: ${msg}`);
       return result;
     }
 
@@ -85,14 +85,14 @@ export async function runTaskCleanup(
         result.expired += 1;
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
-        logger.warn(`a2a-gateway: task cleanup error for ${taskId}: ${msg}`);
+        logger.warn(`claw-crony: task cleanup error for ${taskId}: ${msg}`);
         result.errors += 1;
       }
     }
 
     if (result.expired > 0) {
       logger.info(
-        `a2a-gateway: task cleanup completed - expired=${result.expired} skipped=${result.skipped} errors=${result.errors}`,
+        `claw-crony: task cleanup completed - expired=${result.expired} skipped=${result.skipped} errors=${result.errors}`,
       );
     }
 

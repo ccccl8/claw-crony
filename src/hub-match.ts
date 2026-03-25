@@ -1,5 +1,5 @@
 /**
- * Hub Match API client for openclaw-a2a-gateway.
+ * Hub Match API client for openclaw-claw-crony.
  *
  * Provides a typed client for the hub's /api/matches endpoints:
  * - POST   /api/matches              createMatch
