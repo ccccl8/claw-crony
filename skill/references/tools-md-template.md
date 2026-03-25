@@ -20,7 +20,7 @@ You have an A2A Gateway plugin running on port 18800. You can communicate with p
 When the user says "通过 A2A 让 <PEER_NAME> 做 xxx" / "Send to <PEER_NAME>: xxx" / "Ask <PEER_NAME> to ..." or similar, use the exec tool to run:
 
 ```bash
-node <WORKSPACE>/plugins/a2a-gateway/skill/scripts/a2a-send.mjs \
+node <WORKSPACE>/plugins/claw-crony/skill/scripts/a2a-send.mjs \
   --peer-url http://<PEER_IP>:18800 \
   --token <PEER_TOKEN> \
   --message "YOUR MESSAGE HERE"

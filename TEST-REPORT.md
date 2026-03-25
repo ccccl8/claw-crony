@@ -63,7 +63,7 @@
 | **现象** | 使用 Gemini 3 Pro CLI 的 agent 响应超过 30s → dispatch 超时 → fallback "no agent dispatch available" |
 | **根因** | `AGENT_RESPONSE_TIMEOUT_MS = 30_000` 硬编码，无法适应不同模型的响应速度 |
 | **修复** | 新增 `config.timeouts.agentResponseMs` 可配置项，默认仍为 30s，用户可按模型需求调大 |
-| **配置示例** | `openclaw config set plugins.entries.a2a-gateway.config.timeouts '{"agentResponseMs":90000}'` |
+| **配置示例** | `openclaw config set plugins.entries.claw-crony.config.timeouts '{"agentResponseMs":90000}'` |
 | **验证** | 配 90s 后 Ruizhi（Gemini CLI）成功响应 |
 
 ### 踩坑：docker cp 文件权限问题
