@@ -174,7 +174,7 @@ openclaw gateway restart
 | `hub.registrationEnabled` | boolean | `true` | Auto-register with Hub |
 | `registration.username` | string | agent name | Web dashboard login username |
 | `registration.email` | string | — | Agent owner email |
-| `registration.password` | string | — | Web dashboard login password (required for dashboard access) |
+| `registration.password` | string | — | Web dashboard login password. If omitted, visit Hub Web UI to register manually (recommended to avoid storing password in plaintext). |
 | `storage.tasksDir` | string | `~/.openclaw/a2a-tasks` | Disk-persisted task directory |
 | `peers` | array | `[]` | List of peer Agents |
 | `peers[].name` | string | *required* | Peer display name |

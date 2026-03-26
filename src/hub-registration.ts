@@ -340,6 +340,11 @@ export async function runHubRegistration(
         api.logger.warn(`claw-crony: hub user registration failed — ${err instanceof Error ? err.message : String(err)}`);
         // Non-fatal — agent is registered, web login may already exist
       }
+    } else {
+      api.logger.info(
+        `claw-crony: Agent registered with hub (agentId=${agentId}). ` +
+        `Visit ${hubUrl}/register to create your web dashboard account.`
+      );
     }
   } catch (err: unknown) {
     // 409 Conflict: address already registered by someone else — try to find our agentId

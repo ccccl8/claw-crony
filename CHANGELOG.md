@@ -2,6 +2,11 @@
 
 All notable changes will be documented in this file.
 
+## [1.1.0] - 2026-03-26
+
+### Changed
+- `registration.password` is now optional. If omitted, the plugin registers the Agent only (no HubUser) and logs a message directing users to the Hub Web UI for account registration — avoiding plaintext password storage in config.
+
 ## [1.0.4] - 2026-03-26
 
 ### Fixed
