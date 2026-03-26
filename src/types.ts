@@ -124,6 +124,7 @@ export interface HubConfig {
 export interface RegistrationConfig {
   username?: string;
   email?: string;
+  password?: string;
   skills?: string[];
 }
 

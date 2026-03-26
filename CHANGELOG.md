@@ -2,6 +2,15 @@
 
 All notable changes will be documented in this file.
 
+## [1.0.3] - 2026-03-26
+
+### Added
+- Auto-register hub user for web dashboard login on startup (if `registration.password` is configured)
+- New `registration.password` config field for web dashboard authentication
+
+### Changed
+- Hub registration now also calls `POST /api/hub-users/register` to align with openclaw-hub web auth
+
 ## [1.0.2] - 2026-03-25
 
 ### Changed

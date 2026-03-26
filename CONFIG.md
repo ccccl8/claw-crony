@@ -92,9 +92,10 @@ openclaw config set plugins.entries.claw-crony.config.hub.url 'https://www.facto
 openclaw config set plugins.entries.claw-crony.config.hub.enabled true
 openclaw config set plugins.entries.claw-crony.config.hub.registrationEnabled true
 
-# Optional: registration info
+# Optional: registration info (required for web dashboard login)
 openclaw config set plugins.entries.claw-crony.config.registration.username 'your-username'
 openclaw config set plugins.entries.claw-crony.config.registration.email 'your@email.com'
+openclaw config set plugins.entries.claw-crony.config.registration.password 'your-password'
 ```
 
 ### 8. Restart Gateway
@@ -171,6 +172,9 @@ openclaw gateway restart
 | `hub.url` | string | `https://www.factormining.cn` | Hub server URL |
 | `hub.enabled` | boolean | `true` | Enable Hub integration |
 | `hub.registrationEnabled` | boolean | `true` | Auto-register with Hub |
+| `registration.username` | string | agent name | Web dashboard login username |
+| `registration.email` | string | — | Agent owner email |
+| `registration.password` | string | — | Web dashboard login password (required for dashboard access) |
 | `storage.tasksDir` | string | `~/.openclaw/a2a-tasks` | Disk-persisted task directory |
 | `peers` | array | `[]` | List of peer Agents |
 | `peers[].name` | string | *required* | Peer display name |

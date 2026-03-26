@@ -85,6 +85,30 @@ interface CreateAgentPayload {
   email?: string;
 }
 
+async function registerHubUser(
+  hubUrl: string,
+  agentId: number,
+  username: string,
+  password: string,
+): Promise<void> {
+  const url = `${hubUrl.replace(/\/$/, "")}/api/hub-users/register`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ agentId, username, password }),
+  });
+
+  if (res.status === 409) {
+    // Already registered — this is fine, idempotent
+    return;
+  }
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(`Hub user registration failed: ${JSON.stringify(err)}`);
+  }
+}
+
 async function registerWithHub(hubUrl: string, payload: CreateAgentPayload): Promise<HubAgentDto> {
   const url = `${hubUrl.replace(/\/$/, "")}/api/agents`;
   const res = await fetch(url, {
@@ -236,6 +260,22 @@ export async function runHubRegistration(
           10000,
         );
         api.logger.info(`claw-crony: re-registered with hub using existing token (agentId=${agent.id})`);
+
+        // Also register hub user if password is configured
+        if (registrationConfig.password) {
+          try {
+            await retryWithBackoff(
+              () => registerHubUser(hubUrl, agent.id, registrationConfig.username ?? config.agentCard.name, registrationConfig.password!),
+              3,
+              1000,
+              10000,
+            );
+            api.logger.info(`claw-crony: registered hub user for web login (agentId=${agent.id})`);
+          } catch (err) {
+            api.logger.warn(`claw-crony: hub user registration failed — ${err instanceof Error ? err.message : String(err)}`);
+          }
+        }
+
         // Re-save to update registration file
         const updatedData: HubRegistrationData = {
           ...existing,
@@ -285,6 +325,22 @@ export async function runHubRegistration(
     );
     agentId = agent.id;
     api.logger.info(`claw-crony: registered with hub (agentId=${agentId})`);
+
+    // Also register hub user for web dashboard login (if password provided)
+    if (registrationConfig.password) {
+      try {
+        await retryWithBackoff(
+          () => registerHubUser(hubUrl, agentId, username, registrationConfig.password!),
+          3,
+          1000,
+          10000,
+        );
+        api.logger.info(`claw-crony: registered hub user for web login (agentId=${agentId})`);
+      } catch (err) {
+        api.logger.warn(`claw-crony: hub user registration failed — ${err instanceof Error ? err.message : String(err)}`);
+        // Non-fatal — agent is registered, web login may already exist
+      }
+    }
   } catch (err: unknown) {
     // 409 Conflict: address already registered by someone else — try to find our agentId
     if (typeof err === "object" && err !== null && (err as { status?: number }).status === 409) {
@@ -293,6 +349,21 @@ export async function runHubRegistration(
         if (existingAgent) {
           agentId = existingAgent.id;
           api.logger.info(`claw-crony: found existing registration (agentId=${agentId})`);
+
+          // Also register hub user if password is configured
+          if (registrationConfig.password) {
+            try {
+              await retryWithBackoff(
+                () => registerHubUser(hubUrl, agentId, registrationConfig.username ?? config.agentCard.name, registrationConfig.password!),
+                3,
+                1000,
+                10000,
+              );
+              api.logger.info(`claw-crony: registered hub user for web login (agentId=${agentId})`);
+            } catch (err) {
+              api.logger.warn(`claw-crony: hub user registration failed — ${err instanceof Error ? err.message : String(err)}`);
+            }
+          }
         } else {
           api.logger.error("claw-crony: address conflict but could not find existing agent");
           return null;
