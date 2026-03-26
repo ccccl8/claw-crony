@@ -725,7 +725,7 @@ const plugin = {
         // Hub registration (runs before server starts)
         if (config.hub?.enabled !== false && config.hub?.registrationEnabled !== false) {
           try {
-            const reg = await runHubRegistration(api, config, config.hub, config.registration ?? {});
+            const reg = await runHubRegistration(api, config, config.hub!, config.registration ?? {});
             if (reg) {
               api.logger.info(`claw-crony: registered with hub (agentId=${reg.agentId})`);
             }

@@ -223,7 +223,7 @@ export class A2AClient {
           ? createAuthenticatingFetchWithRetry(fetch, createAuthHandler(peer)!)
           : fetch,
       });
-      const agentCard = await resolver.resolve(baseUrl, path) as Record<string, unknown>;
+      const agentCard = await resolver.resolve(baseUrl, path) as unknown as Record<string, unknown>;
 
       const mainTransport = (agentCard.preferredTransport as string) ?? "JSONRPC";
       const cardUrl = (agentCard.url as string) ?? `${baseUrl}${path}`;
