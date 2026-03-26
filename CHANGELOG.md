@@ -2,6 +2,11 @@
 
 All notable changes will be documented in this file.
 
+## [1.0.4] - 2026-03-26
+
+### Fixed
+- Fix missing `password` field in `parseConfig` registration object
+
 ## [1.0.3] - 2026-03-26
 
 ### Added

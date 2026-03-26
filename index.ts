@@ -264,6 +264,7 @@ export function parseConfig(raw: unknown, resolvePath?: (nextPath: string) => st
     registration: {
       username: asString(registration.username, ""),
       email: asString(registration.email, ""),
+      password: asString(registration.password, ""),
     },
   };
 }
