@@ -59,7 +59,8 @@
         "additionalProperties": false,
         "properties": {
           "username": { "type": "string" },
-          "email": { "type": "string" }
+          "email": { "type": "string" },
+          "password": { "type": "string" }
         }
       },
       "server": {
@@ -267,6 +268,9 @@
     "security": {
       "token": { "sensitive": true },
       "tokens": { "items": { "sensitive": true } }
+    },
+    "registration": {
+      "password": { "sensitive": true }
     }
   }
 }
