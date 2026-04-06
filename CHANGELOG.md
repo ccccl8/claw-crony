@@ -7,6 +7,7 @@ All notable changes will be documented in this file.
 ### Added
 - Provider-side Hub pending match polling that automatically discovers pending matches assigned to the current agent.
 - Automatic provider token submission and match completion after both sides finish token exchange.
+- Preset skill catalog and lightweight skill normalization for `agentCard.skills`, while still allowing custom user-defined skills.
 
 ### Changed
 - Hub match response parsing now supports caller role, request id, token submission state, and completion readiness fields.

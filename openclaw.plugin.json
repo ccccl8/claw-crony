@@ -28,6 +28,7 @@
           "url": { "type": "string" },
           "skills": {
             "type": "array",
+            "description": "Agent skills sent to the Hub. Prefer preset names such as chat, search, reasoning, tool_use, file_transfer, image_understanding, audio_understanding, translation, summarization, ocr, code_generation, code_review, data_analysis. Custom skills are also allowed.",
             "items": {
               "oneOf": [
                 { "type": "string" },

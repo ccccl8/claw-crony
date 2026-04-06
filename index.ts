@@ -28,6 +28,7 @@ import { AuditLogger } from "./src/audit.js";
 import { PeerHealthManager } from "./src/peer-health.js";
 import { runHubRegistration } from "./src/hub-registration.js";
 import { HubMatchClient, type HubMatchResult } from "./src/hub-match.js";
+import { normalizeAgentCardSkills } from "./src/skill-catalog.js";
 import { parseRoutingRules, matchRule } from "./src/routing-rules.js";
 import { isRetryableTransportError } from "./src/transport-fallback.js";
 import type { RoutingRule } from "./src/types.js";
@@ -105,7 +106,7 @@ function extractSkillsFromAgentCard(card: Record<string, unknown>): string[] {
 }
 
 function parseAgentCard(raw: Record<string, unknown>): AgentCardConfig {
-  const skills = Array.isArray(raw.skills) ? raw.skills : [];
+  const skills = normalizeAgentCardSkills(Array.isArray(raw.skills) ? raw.skills as Array<AgentSkillConfig | string> : []);
 
   return {
     name: asString(raw.name, "OpenClaw A2A Gateway"),
