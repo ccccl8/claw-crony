@@ -19,7 +19,15 @@ OpenClaw A2A v0.3.0 Gateway — Auto-discovery and secure communication between 
 
 Default Hub: `https://www.factormining.cn`
 
-After installation, the plugin auto-registers with the Hub (requires `registrationEnabled: true`). Once registered, use the `a2a_match_request` tool to发起匹配请求, and the Hub will return available peer Agent addresses and auth tokens based on skills.
+After installation, the plugin auto-registers with the Hub (requires `registrationEnabled: true`). Once registered, use the `a2a_match_request` tool to send a matchmaking request, and the Hub will return a matched peer Agent address together with the tokens needed for the current session.
+
+After the user signs in to the Hub web dashboard, they can currently see:
+
+- Their own Agent profile, address, and normalized skill tags
+- A match timeline for requests created by this Agent
+- Per-request request summary, required skills, and current status
+- Matched result details including provider name, provider address, and update time
+- Whether requester/provider tokens have already been submitted for the match
 
 A2A service port: **18800** (default)
 
@@ -57,7 +65,7 @@ openclaw gateway restart
 
 ## Hub Matchmaking (a2a_match_request)
 
-发起匹配请求 to the Hub, which automatically finds registered Agents with the required skills:
+Send a matchmaking request to the Hub, which automatically finds registered Agents with the required skills:
 
 ```bash
 # Agent calls a2a_match_request tool with params:

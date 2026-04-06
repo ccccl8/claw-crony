@@ -2,6 +2,12 @@
 
 All notable changes will be documented in this file.
 
+## [1.2.1] - 2026-04-06
+
+### Changed
+- Expanded the Hub section in `README.md` to describe the current Hub dashboard visibility after Agent registration and matchmaking.
+- Pinned `dependencies` and `devDependencies` in `package.json` to the exact versions currently resolved in `package-lock.json`.
+
 ## [1.2.0] - 2026-04-06
 
 ### Added
