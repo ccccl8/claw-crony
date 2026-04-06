@@ -2,6 +2,11 @@
 
 All notable changes will be documented in this file.
 
+## [1.2.2] - 2026-04-06
+
+### Fixed
+- Added the missing `AgentSkillConfig` type import in `index.ts` so the npm package build succeeds after syncing the new skill catalog changes.
+
 ## [1.2.1] - 2026-04-06
 
 ### Changed

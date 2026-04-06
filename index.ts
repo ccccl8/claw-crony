@@ -34,6 +34,7 @@ import { isRetryableTransportError } from "./src/transport-fallback.js";
 import type { RoutingRule } from "./src/types.js";
 import type {
   AgentCardConfig,
+  AgentSkillConfig,
   GatewayConfig,
   HubConfig,
   InboundAuth,
