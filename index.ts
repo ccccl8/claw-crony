@@ -27,7 +27,7 @@ import { GatewayTelemetry } from "./src/telemetry.js";
 import { AuditLogger } from "./src/audit.js";
 import { PeerHealthManager } from "./src/peer-health.js";
 import { runHubRegistration } from "./src/hub-registration.js";
-import { HubMatchClient } from "./src/hub-match.js";
+import { HubMatchClient, type HubMatchResult } from "./src/hub-match.js";
 import { parseRoutingRules, matchRule } from "./src/routing-rules.js";
 import { isRetryableTransportError } from "./src/transport-fallback.js";
 import type { RoutingRule } from "./src/types.js";
@@ -277,6 +277,71 @@ function normalizeCardPath(): string {
   return `/${AGENT_CARD_PATH}`;
 }
 
+function getAdvertisedInboundToken(config: GatewayConfig, hubClient?: HubMatchClient | null): string | null {
+  if (config.security.tokens && config.security.tokens.length > 0) {
+    return config.security.tokens[0] ?? null;
+  }
+
+  if (config.security.token) {
+    return config.security.token;
+  }
+
+  return hubClient?.registrationToken ?? null;
+}
+
+async function processPendingHubMatches(
+  api: OpenClawPluginApi,
+  config: GatewayConfig,
+  processedMatches: Set<number>,
+) {
+  let hubClient: HubMatchClient;
+  try {
+    hubClient = await HubMatchClient.create();
+  } catch (err) {
+    api.logger.warn(`claw-crony: pending match polling skipped - ${err instanceof Error ? err.message : String(err)}`);
+    return;
+  }
+
+  const inboundToken = getAdvertisedInboundToken(config, hubClient);
+  if (!inboundToken) {
+    api.logger.warn("claw-crony: pending match polling skipped - no inbound token available");
+    return;
+  }
+
+  let matches: HubMatchResult[];
+  try {
+    matches = await hubClient.getPendingMatches();
+  } catch (err) {
+    api.logger.warn(`claw-crony: failed to fetch pending matches - ${err instanceof Error ? err.message : String(err)}`);
+    return;
+  }
+
+  for (const match of matches) {
+    if (match.callerRole !== "provider") {
+      continue;
+    }
+
+    try {
+      const alreadySubmitted = match.providerTokenSubmitted === true || processedMatches.has(match.id);
+      let currentMatch = match;
+
+      if (!alreadySubmitted) {
+        currentMatch = await hubClient.submitToken(match.id, inboundToken);
+        processedMatches.add(match.id);
+        api.logger.info(`claw-crony: submitted provider token for hub match ${match.id}`);
+      }
+
+      if (currentMatch.readyForComplete === true && currentMatch.status === "token_exchange") {
+        await hubClient.completeMatch(match.id, inboundToken);
+        processedMatches.delete(match.id);
+        api.logger.info(`claw-crony: completed hub match ${match.id}`);
+      }
+    } catch (err) {
+      api.logger.warn(`claw-crony: failed to process hub match ${match.id} - ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+}
+
 const plugin = {
   id: "claw-crony",
   name: "Claw Crony",
@@ -435,7 +500,9 @@ const plugin = {
     let server: Server | null = null;
     let grpcServer: GrpcServer | null = null;
     let cleanupTimer: ReturnType<typeof setInterval> | null = null;
+    let hubMatchPollingTimer: ReturnType<typeof setInterval> | null = null;
     const grpcPort = config.server.port + 1;
+    const processedHubMatches = new Set<number>();
 
     api.registerGatewayMethod("a2a.metrics", ({ respond }) => {
       respond(true, {
@@ -662,7 +729,7 @@ const plugin = {
             match = await client.createMatch({
               skills: params.skills,
               description: params.description,
-              token: client["registration"].token,
+              token: getAdvertisedInboundToken(config, client) ?? client.registrationToken,
             });
           } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
@@ -675,7 +742,10 @@ const plugin = {
           // Submit our token
           let updatedMatch: Awaited<ReturnType<HubMatchClient["submitToken"]>>;
           try {
-            updatedMatch = await client.submitToken(match.id, client["registration"].token);
+            updatedMatch = await client.submitToken(
+              match.id,
+              getAdvertisedInboundToken(config, client) ?? client.registrationToken,
+            );
           } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
             return {
@@ -686,8 +756,8 @@ const plugin = {
 
           const provider = updatedMatch.provider;
           const providerAddress = provider?.address ?? "(unknown)";
-          const yourToken = updatedMatch.yourToken ?? "(none)";
-          const peerToken = updatedMatch.peerToken ?? "(none)";
+          const providerAccessToken = updatedMatch.yourToken ?? "(none)";
+          const requesterInboundToken = updatedMatch.peerToken ?? "(none)";
           const status = updatedMatch.status;
 
           return {
@@ -695,16 +765,16 @@ const plugin = {
               type: "text" as const,
               text: `Match ${status}: id=${updatedMatch.id}\n` +
                 `Provider: ${provider?.name ?? "(unknown)"} at ${providerAddress}\n` +
-                `Your token (use to contact provider): ${yourToken}\n` +
-                `Peer token (provider's token to contact you): ${peerToken}`,
+                `Provider access token (use to contact provider): ${providerAccessToken}\n` +
+                `Requester inbound token (provider uses this to contact you): ${requesterInboundToken}`,
             }],
             details: {
               ok: true,
               matchId: updatedMatch.id,
               status: updatedMatch.status,
               providerAddress,
-              yourToken,
-              peerToken,
+              yourToken: providerAccessToken,
+              peerToken: requesterInboundToken,
             },
           };
         },
@@ -822,6 +892,17 @@ const plugin = {
         doCleanup();
         cleanupTimer = setInterval(doCleanup, intervalMs);
 
+        if (config.hub?.enabled !== false) {
+          const pollingIntervalMs = Math.max(5_000, config.resilience.healthCheck.intervalMs);
+          const pollHubMatches = () => {
+            void processPendingHubMatches(api, config, processedHubMatches);
+          };
+
+          pollHubMatches();
+          hubMatchPollingTimer = setInterval(pollHubMatches, pollingIntervalMs);
+          api.logger.info(`claw-crony: hub match polling enabled interval=${pollingIntervalMs}ms`);
+        }
+
         api.logger.info(
           `claw-crony: task cleanup enabled — ttl=${config.storage.taskTtlHours}h interval=${config.storage.cleanupIntervalMinutes}min`,
         );
@@ -835,6 +916,11 @@ const plugin = {
         if (cleanupTimer) {
           clearInterval(cleanupTimer);
           cleanupTimer = null;
+        }
+
+        if (hubMatchPollingTimer) {
+          clearInterval(hubMatchPollingTimer);
+          hubMatchPollingTimer = null;
         }
 
         // Stop gRPC server

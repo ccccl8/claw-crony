@@ -26,11 +26,16 @@ export interface HubAgentDto {
 
 export interface HubMatchResult {
   id: number;
+  requestId?: number | null;
   status: string;
   requester: HubAgentDto | null;
   provider: HubAgentDto | null;
   yourToken: string | null;
   peerToken: string | null;
+  callerRole?: "requester" | "provider" | "observer" | null;
+  requesterTokenSubmitted?: boolean;
+  providerTokenSubmitted?: boolean;
+  readyForComplete?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -44,6 +49,14 @@ export class HubMatchClient {
   constructor(hubUrl: string, registration: HubRegistrationData) {
     this.hubUrl = hubUrl.replace(/\/$/, "");
     this.registration = registration;
+  }
+
+  get agentId(): number {
+    return this.registration.agentId;
+  }
+
+  get registrationToken(): string {
+    return this.registration.token;
   }
 
   static async create(): Promise<HubMatchClient> {

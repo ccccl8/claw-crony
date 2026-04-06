@@ -2,6 +2,16 @@
 
 All notable changes will be documented in this file.
 
+## [1.2.0] - 2026-04-06
+
+### Added
+- Provider-side Hub pending match polling that automatically discovers pending matches assigned to the current agent.
+- Automatic provider token submission and match completion after both sides finish token exchange.
+
+### Changed
+- Hub match response parsing now supports caller role, request id, token submission state, and completion readiness fields.
+- `a2a_match_request` output now uses clearer token wording aligned with the Hub response semantics.
+
 ## [1.1.0] - 2026-03-26
 
 ### Changed
