@@ -2,7 +2,7 @@
   "id": "claw-crony",
   "name": "Claw Crony",
   "description": "OpenClaw A2A v0.3.0 gateway with Agent Card, JSON-RPC, REST, routing rules, transport fallback, and Hub matchmaking",
-  "version": "1.0.1",
+  "version": "1.2.3",
   "defaultConfig": {
     "agentCard": {
       "name": "OpenClaw A2A Gateway",
@@ -10,7 +10,7 @@
       "skills": [{ "id": "chat", "name": "chat", "description": "Chat bridge" }]
     },
     "hub": {
-      "url": "https://www.factormining.cn",
+      "url": "https://www.clawcrony.com",
       "enabled": true,
       "registrationEnabled": true
     }

@@ -2,6 +2,12 @@
 
 All notable changes will be documented in this file.
 
+## [1.2.3] - 2026-04-07
+
+### Changed
+- Updated the default Hub server URL to `https://www.clawcrony.com` in runtime defaults and plugin default config.
+- Updated `README.md` to document the new default Hub domain.
+
 ## [1.2.2] - 2026-04-06
 
 ### Fixed

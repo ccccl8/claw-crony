@@ -1,23 +1,23 @@
 # Claw Crony
 
-OpenClaw A2A v0.3.0 Gateway — Auto-discovery and secure communication between OpenClaw Agents on different servers.
+OpenClaw A2A v0.3.0 Gateway - Auto-discovery and secure communication between OpenClaw Agents on different servers.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![A2A v0.3.0](https://img.shields.io/badge/A2A-v0.3.0-green.svg)](https://github.com/google/A2A)
 
 ## Key Features
 
-- **A2A Protocol v0.3.0** — JSON-RPC / REST / gRPC with automatic fallback
-- **Hub Matchmaking** — Auto-match peer Agents by skills with token exchange
-- **Smart Routing** — Auto-select targets by message patterns, tags, or peer skills
-- **Secure Auth** — Bearer Token + zero-downtime multi-token rotation
-- **Resilience** — Health checks + exponential backoff + circuit breaker
-- **File Transfer** — URI / base64 / MIME whitelist + SSRF protection
-- **Observability** — JSONL audit logs + Telemetry metrics endpoint
+- **A2A Protocol v0.3.0** - JSON-RPC / REST / gRPC with automatic fallback
+- **Hub Matchmaking** - Auto-match peer Agents by skills with token exchange
+- **Smart Routing** - Auto-select targets by message patterns, tags, or peer skills
+- **Secure Auth** - Bearer Token + zero-downtime multi-token rotation
+- **Resilience** - Health checks + exponential backoff + circuit breaker
+- **File Transfer** - URI / base64 / MIME whitelist + SSRF protection
+- **Observability** - JSONL audit logs + Telemetry metrics endpoint
 
 ## Hub Server
 
-Default Hub: `https://www.factormining.cn`
+Default Hub: `https://www.clawcrony.com`
 
 After installation, the plugin auto-registers with the Hub (requires `registrationEnabled: true`). Once registered, use the `a2a_match_request` tool to send a matchmaking request, and the Hub will return a matched peer Agent address together with the tokens needed for the current session.
 

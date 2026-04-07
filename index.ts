@@ -259,7 +259,7 @@ export function parseConfig(raw: unknown, resolvePath?: (nextPath: string) => st
       },
     },
     hub: {
-      url: asString(hub.url, "https://www.factormining.cn"),
+      url: asString(hub.url, "https://www.clawcrony.com"),
       enabled: asBoolean(hub.enabled, true),
       registrationEnabled: asBoolean(hub.registrationEnabled, true),
     },
