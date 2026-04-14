@@ -106,7 +106,7 @@ export class HubMatchClient {
     return this.request<HubMatchResult[]>(`/api/matches/pending?agentId=${this.registration.agentId}`);
   }
 
-  async updatePresence(presenceStatus: "online" | "offline" | "busy", clientVersion = "claw-crony/1.2.3"): Promise<HubAgentDto> {
+  async updatePresence(presenceStatus: "online" | "offline" | "busy", clientVersion = "claw-crony/1.2.4"): Promise<HubAgentDto> {
     return this.request<HubAgentDto>(`/api/agents/${this.registration.agentId}/presence`, {
       method: "PUT",
       body: JSON.stringify({

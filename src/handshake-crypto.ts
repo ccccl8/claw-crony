@@ -3,7 +3,7 @@ import crypto from "node:crypto";
 import type { EncryptedHandshakeMessage, HandshakePayload, IdentityData } from "./types.js";
 
 function toBase64(value: Buffer | ArrayBuffer): string {
-  return Buffer.from(value).toString("base64");
+  return Buffer.from(value instanceof Buffer ? value : new Uint8Array(value)).toString("base64");
 }
 
 function fromBase64(value: string): Buffer {

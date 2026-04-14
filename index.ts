@@ -425,7 +425,7 @@ async function processPendingHubMatches(
           });
           await hubClient.markReady(match.id);
           api.logger.info(`claw-crony: answered encrypted handshake for match ${match.id}`);
-        } else if (message.messageType === "answer" && match.callerRole === "requester") {
+        } else if (message.messageType === "answer") {
           await hubClient.markReady(match.id);
           api.logger.info(`claw-crony: received encrypted handshake answer for match ${match.id}`);
         }
