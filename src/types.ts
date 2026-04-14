@@ -126,6 +126,7 @@ export interface RegistrationConfig {
   email?: string;
   password?: string;
   skills?: string[];
+  clientId?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -136,13 +137,54 @@ export interface HubRegistrationData {
   version: number;
   hubUrl: string;
   agentId: number;
-  address: string;
-  token: string;
+  clientId: string;
+  publicKey: string;
+  keyVersion: number;
   registeredAt: string;
   name: string;
   description: string;
   skills: string[];
 }
+
+export interface IdentityData {
+  version: number;
+  clientId: string;
+  publicKey: string;
+  privateKey: string;
+  keyVersion: number;
+  createdAt: string;
+}
+
+export interface EphemeralTokenRecord {
+  token: string;
+  matchId: number;
+  peerAgentId: number;
+  expiresAt: number;
+}
+
+export interface HandshakePayload {
+  version: number;
+  matchId: number;
+  sessionId: string;
+  fromAgentId: number;
+  toAgentId: number;
+  address: string;
+  agentCardPath: string;
+  token: string;
+  tokenExpiresAt: string;
+  protocols: string[];
+  createdAt: string;
+  nonce: string;
+}
+
+export interface EncryptedHandshakeMessage {
+  version: number;
+  algorithm: "x25519-aes-256-gcm";
+  senderPublicKey: string;
+  iv: string;
+  ciphertext: string;
+  authTag: string;
+ }
 
 // ---------------------------------------------------------------------------
 // Peer resilience configuration

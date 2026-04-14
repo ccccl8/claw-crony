@@ -7,6 +7,7 @@
  */
 
 import type { Server } from "node:http";
+import crypto from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 
@@ -27,15 +28,19 @@ import { GatewayTelemetry } from "./src/telemetry.js";
 import { AuditLogger } from "./src/audit.js";
 import { PeerHealthManager } from "./src/peer-health.js";
 import { runHubRegistration } from "./src/hub-registration.js";
-import { HubMatchClient, type HubMatchResult } from "./src/hub-match.js";
+import { HubMatchClient, type HubHandshakeMessage, type HubMatchResult } from "./src/hub-match.js";
 import { normalizeAgentCardSkills } from "./src/skill-catalog.js";
 import { parseRoutingRules, matchRule } from "./src/routing-rules.js";
 import { isRetryableTransportError } from "./src/transport-fallback.js";
+import { decryptHandshake, encryptHandshake } from "./src/handshake-crypto.js";
+import { issueEphemeralInboundToken } from "./src/ephemeral-token.js";
+import { loadIdentity } from "./src/identity-store.js";
 import type { RoutingRule } from "./src/types.js";
 import type {
   AgentCardConfig,
   AgentSkillConfig,
   GatewayConfig,
+  HandshakePayload,
   HubConfig,
   InboundAuth,
   OpenClawPluginApi,
@@ -267,6 +272,7 @@ export function parseConfig(raw: unknown, resolvePath?: (nextPath: string) => st
       username: asString(registration.username, ""),
       email: asString(registration.email, ""),
       password: asString(registration.password, ""),
+      clientId: asString(registration.clientId, ""),
     },
   };
 }
@@ -279,22 +285,68 @@ function normalizeCardPath(): string {
   return `/${AGENT_CARD_PATH}`;
 }
 
-function getAdvertisedInboundToken(config: GatewayConfig, hubClient?: HubMatchClient | null): string | null {
-  if (config.security.tokens && config.security.tokens.length > 0) {
-    return config.security.tokens[0] ?? null;
+function getAdvertisedAddress(config: GatewayConfig): string | null {
+  if (config.agentCard.url) {
+    try {
+      const url = new URL(config.agentCard.url);
+      return `${url.hostname}:${url.port || (url.protocol === "https:" ? "443" : "80")}`;
+    } catch {
+      // Ignore invalid configured URL and fall back below.
+    }
   }
 
-  if (config.security.token) {
-    return config.security.token;
+  if (config.server.host && config.server.port) {
+    return `${config.server.host}:${config.server.port}`;
   }
 
-  return hubClient?.registrationToken ?? null;
+  return null;
+}
+
+function upsertEphemeralPeer(
+  config: GatewayConfig,
+  peerName: string,
+  address: string,
+  token: string,
+) {
+  const normalizedAddress = address.startsWith("http://") || address.startsWith("https://")
+    ? address
+    : `http://${address}`;
+  const agentCardUrl = `${normalizedAddress}/.well-known/agent.json`;
+  const existing = config.peers.find((peer) => peer.name === peerName);
+  if (existing) {
+    existing.agentCardUrl = agentCardUrl;
+    existing.auth = { type: "bearer", token };
+    return;
+  }
+
+  config.peers.push({
+    name: peerName,
+    agentCardUrl,
+    auth: { type: "bearer", token },
+  });
+}
+
+async function waitForHandshakeAnswer(
+  hubClient: HubMatchClient,
+  matchId: number,
+  timeoutMs = 45_000,
+): Promise<HubHandshakeMessage> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const pending = await hubClient.getPendingHandshakeMessages(matchId);
+    const answer = pending.find((message) => message.messageType === "answer");
+    if (answer) {
+      return answer;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1_500));
+  }
+  throw new Error(`Timed out waiting for handshake answer for match ${matchId}`);
 }
 
 async function processPendingHubMatches(
   api: OpenClawPluginApi,
   config: GatewayConfig,
-  processedMatches: Set<number>,
+  processedMessages: Set<number>,
 ) {
   let hubClient: HubMatchClient;
   try {
@@ -304,9 +356,9 @@ async function processPendingHubMatches(
     return;
   }
 
-  const inboundToken = getAdvertisedInboundToken(config, hubClient);
-  if (!inboundToken) {
-    api.logger.warn("claw-crony: pending match polling skipped - no inbound token available");
+  const identity = loadIdentity();
+  if (!identity) {
+    api.logger.warn("claw-crony: pending match polling skipped - no local identity available");
     return;
   }
 
@@ -324,19 +376,59 @@ async function processPendingHubMatches(
     }
 
     try {
-      const alreadySubmitted = match.providerTokenSubmitted === true || processedMatches.has(match.id);
-      let currentMatch = match;
+      const pendingMessages = await hubClient.getPendingHandshakeMessages(match.id);
+      for (const message of pendingMessages) {
+        if (processedMessages.has(message.id)) {
+          continue;
+        }
 
-      if (!alreadySubmitted) {
-        currentMatch = await hubClient.submitToken(match.id, inboundToken);
-        processedMatches.add(match.id);
-        api.logger.info(`claw-crony: submitted provider token for hub match ${match.id}`);
-      }
+        const decrypted = decryptHandshake(message.ciphertext, identity);
+        await hubClient.consumeHandshakeMessage(match.id, message.id);
+        processedMessages.add(message.id);
 
-      if (currentMatch.readyForComplete === true && currentMatch.status === "token_exchange") {
-        await hubClient.completeMatch(match.id, inboundToken);
-        processedMatches.delete(match.id);
-        api.logger.info(`claw-crony: completed hub match ${match.id}`);
+        const remoteName = match.callerRole === "provider"
+          ? (match.requester?.name ?? `agent-${decrypted.fromAgentId}`)
+          : (match.provider?.name ?? `agent-${decrypted.fromAgentId}`);
+        upsertEphemeralPeer(config, remoteName, decrypted.address, decrypted.token);
+
+        if (message.messageType === "offer" && match.callerRole === "provider") {
+          const localAddress = getAdvertisedAddress(config);
+          if (!localAddress) {
+            api.logger.warn(`claw-crony: cannot answer match ${match.id} because no advertised address is configured`);
+            continue;
+          }
+
+          const issued = issueEphemeralInboundToken(config, match.id, decrypted.fromAgentId);
+          const payload: HandshakePayload = {
+            version: 1,
+            matchId: match.id,
+            sessionId: crypto.randomUUID(),
+            fromAgentId: hubClient.agentId,
+            toAgentId: decrypted.fromAgentId,
+            address: localAddress,
+            agentCardPath: "/.well-known/agent.json",
+            token: issued.token,
+            tokenExpiresAt: issued.expiresAt,
+            protocols: ["jsonrpc", "rest", "grpc"],
+            createdAt: new Date().toISOString(),
+            nonce: crypto.randomBytes(12).toString("hex"),
+          };
+          const peerPublicKey = match.requester?.publicKey;
+          if (!peerPublicKey) {
+            api.logger.warn(`claw-crony: cannot answer match ${match.id} because requester public key is missing`);
+            continue;
+          }
+          await hubClient.sendHandshakeMessage(match.id, {
+            messageType: "answer",
+            ciphertext: encryptHandshake(payload, peerPublicKey),
+            expiresAt: issued.expiresAt,
+          });
+          await hubClient.markReady(match.id);
+          api.logger.info(`claw-crony: answered encrypted handshake for match ${match.id}`);
+        } else if (message.messageType === "answer" && match.callerRole === "requester") {
+          await hubClient.markReady(match.id);
+          api.logger.info(`claw-crony: received encrypted handshake answer for match ${match.id}`);
+        }
       }
     } catch (err) {
       api.logger.warn(`claw-crony: failed to process hub match ${match.id} - ${err instanceof Error ? err.message : String(err)}`);
@@ -504,7 +596,7 @@ const plugin = {
     let cleanupTimer: ReturnType<typeof setInterval> | null = null;
     let hubMatchPollingTimer: ReturnType<typeof setInterval> | null = null;
     const grpcPort = config.server.port + 1;
-    const processedHubMatches = new Set<number>();
+    const processedHubMessages = new Set<number>();
 
     api.registerGatewayMethod("a2a.metrics", ({ respond }) => {
       respond(true, {
@@ -689,14 +781,13 @@ const plugin = {
 
       // ------------------------------------------------------------------
       // Agent tool: a2a_match_request
-      // Creates a match request on the hub and submits this agent's token.
-      // Returns provider address + yourToken + peerToken for A2A communication.
+      // Creates a match request on the hub and performs encrypted connection-info handshake.
       // ------------------------------------------------------------------
       api.registerTool({
         name: "a2a_match_request",
         description: "Request a match with another agent via the hub. " +
           "The hub finds a provider agent with matching skills, creates a match record, " +
-          "and returns the provider's address along with tokens for secure A2A communication. " +
+          "and relays encrypted handshake messages so both agents can exchange temporary A2A connection details. " +
           "Use this to discover and connect with peer agents through the hub's registry.",
         label: "A2A Match Request",
         parameters: {
@@ -715,9 +806,9 @@ const plugin = {
           },
         },
         async execute(toolCallId, params) {
-          let client: HubMatchClient;
+          let hubClient: HubMatchClient;
           try {
-            client = await HubMatchClient.create();
+            hubClient = await HubMatchClient.create();
           } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
             return {
@@ -726,12 +817,27 @@ const plugin = {
             };
           }
 
+          const identity = loadIdentity();
+          if (!identity) {
+            return {
+              content: [{ type: "text" as const, text: "No local identity found. Restart the plugin and try again." }],
+              details: { ok: false, error: "identity_missing" },
+            };
+          }
+
+          const localAddress = getAdvertisedAddress(config);
+          if (!localAddress) {
+            return {
+              content: [{ type: "text" as const, text: "No advertised address is configured for this agent." }],
+              details: { ok: false, error: "address_missing" },
+            };
+          }
+
           let match: Awaited<ReturnType<HubMatchClient["createMatch"]>>;
           try {
-            match = await client.createMatch({
+            match = await hubClient.createMatch({
               skills: params.skills,
               description: params.description,
-              token: getAdvertisedInboundToken(config, client) ?? client.registrationToken,
             });
           } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
@@ -741,42 +847,86 @@ const plugin = {
             };
           }
 
-          // Submit our token
-          let updatedMatch: Awaited<ReturnType<HubMatchClient["submitToken"]>>;
+          const provider = match.provider;
+          const providerPublicKey = provider?.publicKey;
+          if (!provider || !providerPublicKey) {
+            return {
+              content: [{ type: "text" as const, text: `Match created (id=${match.id}) but provider public key is missing` }],
+              details: { ok: false, matchId: match.id, error: "provider_public_key_missing" },
+            };
+          }
+
+          const issued = issueEphemeralInboundToken(config, match.id, provider.id);
+          const localPayload: HandshakePayload = {
+            version: 1,
+            matchId: match.id,
+            sessionId: crypto.randomUUID(),
+            fromAgentId: hubClient.agentId,
+            toAgentId: provider.id,
+            address: localAddress,
+            agentCardPath: "/.well-known/agent.json",
+            token: issued.token,
+            tokenExpiresAt: issued.expiresAt,
+            protocols: ["jsonrpc", "rest", "grpc"],
+            createdAt: new Date().toISOString(),
+            nonce: crypto.randomBytes(12).toString("hex"),
+          };
+
           try {
-            updatedMatch = await client.submitToken(
-              match.id,
-              getAdvertisedInboundToken(config, client) ?? client.registrationToken,
-            );
+            await hubClient.sendHandshakeMessage(match.id, {
+              messageType: "offer",
+              ciphertext: encryptHandshake(localPayload, providerPublicKey),
+              expiresAt: issued.expiresAt,
+            });
           } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
             return {
-              content: [{ type: "text" as const, text: `Match created (id=${match.id}) but failed to submit token: ${msg}` }],
+              content: [{ type: "text" as const, text: `Match created (id=${match.id}) but failed to send encrypted handshake offer: ${msg}` }],
               details: { ok: false, matchId: match.id, error: msg },
             };
           }
 
-          const provider = updatedMatch.provider;
-          const providerAddress = provider?.address ?? "(unknown)";
-          const providerAccessToken = updatedMatch.yourToken ?? "(none)";
-          const requesterInboundToken = updatedMatch.peerToken ?? "(none)";
-          const status = updatedMatch.status;
+          let answer: HubHandshakeMessage;
+          try {
+            answer = await waitForHandshakeAnswer(hubClient, match.id);
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            return {
+              content: [{ type: "text" as const, text: `Encrypted handshake offer sent for match ${match.id}, but waiting for answer failed: ${msg}` }],
+              details: { ok: false, matchId: match.id, error: msg },
+            };
+          }
+
+          let remotePayload: HandshakePayload;
+          try {
+            remotePayload = decryptHandshake(answer.ciphertext, identity);
+            await hubClient.consumeHandshakeMessage(match.id, answer.id);
+            upsertEphemeralPeer(config, provider.name, remotePayload.address, remotePayload.token);
+            await hubClient.markReady(match.id);
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            return {
+              content: [{ type: "text" as const, text: `Encrypted handshake answer received for match ${match.id}, but processing failed: ${msg}` }],
+              details: { ok: false, matchId: match.id, error: msg },
+            };
+          }
 
           return {
             content: [{
               type: "text" as const,
-              text: `Match ${status}: id=${updatedMatch.id}\n` +
-                `Provider: ${provider?.name ?? "(unknown)"} at ${providerAddress}\n` +
-                `Provider access token (use to contact provider): ${providerAccessToken}\n` +
-                `Requester inbound token (provider uses this to contact you): ${requesterInboundToken}`,
+              text: `Encrypted handshake ready: match=${match.id}\n` +
+                `Provider: ${provider.name}\n` +
+                `Address: ${remotePayload.address}\n` +
+                `Temporary token: ${remotePayload.token}\n` +
+                `Token expires at: ${remotePayload.tokenExpiresAt}`,
             }],
             details: {
               ok: true,
-              matchId: updatedMatch.id,
-              status: updatedMatch.status,
-              providerAddress,
-              yourToken: providerAccessToken,
-              peerToken: requesterInboundToken,
+              matchId: match.id,
+              status: "ready_to_connect",
+              providerAddress: remotePayload.address,
+              peerToken: remotePayload.token,
+              tokenExpiresAt: remotePayload.tokenExpiresAt,
             },
           };
         },
@@ -798,10 +948,16 @@ const plugin = {
         // Hub registration (runs before server starts)
         if (config.hub?.enabled !== false && config.hub?.registrationEnabled !== false) {
           try {
-            const reg = await runHubRegistration(api, config, config.hub!, config.registration ?? {});
-            if (reg) {
-              api.logger.info(`claw-crony: registered with hub (agentId=${reg.agentId})`);
-            }
+              const reg = await runHubRegistration(api, config, config.hub!, config.registration ?? {});
+              if (reg) {
+                api.logger.info(`claw-crony: registered with hub (agentId=${reg.agentId})`);
+                try {
+                  const hubClient = await HubMatchClient.create();
+                  await hubClient.updatePresence("online");
+                } catch (presenceErr) {
+                  api.logger.warn(`claw-crony: failed to update hub presence - ${presenceErr instanceof Error ? presenceErr.message : String(presenceErr)}`);
+                }
+              }
           } catch (err) {
             api.logger.warn(`claw-crony: hub registration failed — ${err instanceof Error ? err.message : String(err)}`);
             // Continue startup anyway — hub is optional
@@ -897,7 +1053,7 @@ const plugin = {
         if (config.hub?.enabled !== false) {
           const pollingIntervalMs = Math.max(5_000, config.resilience.healthCheck.intervalMs);
           const pollHubMatches = () => {
-            void processPendingHubMatches(api, config, processedHubMatches);
+            void processPendingHubMatches(api, config, processedHubMessages);
           };
 
           pollHubMatches();
@@ -913,6 +1069,15 @@ const plugin = {
         // Stop peer health checks
         healthManager?.stop();
         auditLogger.close();
+
+        if (config.hub?.enabled !== false) {
+          try {
+            const hubClient = await HubMatchClient.create();
+            await hubClient.updatePresence("offline");
+          } catch {
+            // Ignore best-effort presence shutdown failure.
+          }
+        }
 
         // Stop task cleanup timer
         if (cleanupTimer) {

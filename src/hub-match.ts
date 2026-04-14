@@ -1,27 +1,17 @@
 /**
- * Hub Match API client for openclaw-claw-crony.
- *
- * Provides a typed client for the hub's /api/matches endpoints:
- * - POST   /api/matches              createMatch
- * - GET    /api/matches/{id}         getMatch
- * - GET    /api/matches/pending       getPendingMatches
- * - POST   /api/matches/{id}/token   submitToken
- * - POST   /api/matches/{id}/complete completeMatch
- * - POST   /api/matches/{id}/cancel  cancelMatch
+ * Hub Match API client for claw-crony.
  */
 
 import { loadRegistration } from "./hub-registration.js";
 import type { HubRegistrationData } from "./types.js";
 
-// ---------------------------------------------------------------------------
-// DTOs matching hub's MatchResponse
-// ---------------------------------------------------------------------------
-
 export interface HubAgentDto {
   id: number;
   name: string;
-  address: string;
   skills: string[];
+  clientId?: string;
+  publicKey?: string;
+  presenceStatus?: string;
 }
 
 export interface HubMatchResult {
@@ -30,17 +20,32 @@ export interface HubMatchResult {
   status: string;
   requester: HubAgentDto | null;
   provider: HubAgentDto | null;
-  yourToken: string | null;
-  peerToken: string | null;
+  yourToken?: string | null;
+  peerToken?: string | null;
   callerRole?: "requester" | "provider" | "observer" | null;
   requesterTokenSubmitted?: boolean;
   providerTokenSubmitted?: boolean;
   readyForComplete?: boolean;
+  requesterHandshakeSent?: boolean;
+  providerHandshakeSent?: boolean;
+  requesterHandshakeConsumed?: boolean;
+  providerHandshakeConsumed?: boolean;
+  requesterReady?: boolean;
+  providerReady?: boolean;
+  readyForConnect?: boolean;
 }
 
-// ---------------------------------------------------------------------------
-// HubMatchClient
-// ---------------------------------------------------------------------------
+export interface HubHandshakeMessage {
+  id: number;
+  senderAgentId: number;
+  receiverAgentId: number;
+  messageType: "offer" | "answer";
+  ciphertext: string;
+  status: string;
+  expiresAt: string;
+  createdAt?: string;
+  consumedAt?: string | null;
+}
 
 export class HubMatchClient {
   private readonly hubUrl: string;
@@ -55,17 +60,12 @@ export class HubMatchClient {
     return this.registration.agentId;
   }
 
-  get registrationToken(): string {
-    return this.registration.token;
-  }
-
   static async create(): Promise<HubMatchClient> {
     const registration = loadRegistration();
     if (!registration) {
       throw new Error("No hub registration found. Run the gateway first to register with the hub.");
     }
-    const configUrl = registration.hubUrl;
-    return new HubMatchClient(configUrl, registration);
+    return new HubMatchClient(registration.hubUrl, registration);
   }
 
   private async request<T>(path: string, options: RequestInit = {}): Promise<T> {
@@ -74,7 +74,6 @@ export class HubMatchClient {
       ...options,
       headers: {
         "Content-Type": "application/json",
-        "Authorization": `Bearer ${this.registration.token}`,
         ...(options.headers ?? {}),
       },
     });
@@ -87,68 +86,77 @@ export class HubMatchClient {
     return res.json() as Promise<T>;
   }
 
-  /**
-   * Create a new match request.
-   * @param params.skills - Skills to search for in a provider
-   * @param params.description - Optional description of the match request
-   * @param params.token - Optional bearer token to include for this agent
-   */
-  async createMatch(params: {
-    skills: string[];
-    description?: string;
-    token?: string;
-  }): Promise<HubMatchResult> {
+  async createMatch(params: { skills: string[]; description?: string }): Promise<HubMatchResult> {
     return this.request<HubMatchResult>("/api/matches", {
       method: "POST",
       body: JSON.stringify({
         agentId: this.registration.agentId,
         requiredSkills: params.skills,
         description: params.description ?? "",
-        token: params.token,
       }),
     });
   }
 
-  /**
-   * Get a match result by ID.
-   * @param matchId - The match ID
-   * @param callerId - Optional agent ID to set callerId query param (affects yourToken)
-   */
   async getMatch(matchId: number, callerId?: number): Promise<HubMatchResult> {
     const path = callerId != null ? `/api/matches/${matchId}?callerId=${callerId}` : `/api/matches/${matchId}`;
     return this.request<HubMatchResult>(path);
   }
 
-  /**
-   * Get all pending matches for this agent.
-   */
   async getPendingMatches(): Promise<HubMatchResult[]> {
-    return this.request<HubMatchResult[]>(
-      `/api/matches/pending?agentId=${this.registration.agentId}`
-    );
+    return this.request<HubMatchResult[]>(`/api/matches/pending?agentId=${this.registration.agentId}`);
   }
 
-  /**
-   * Submit this agent's token for a match.
-   * @param matchId - The match ID
-   * @param token - This agent's bearer token
-   */
-  async submitToken(matchId: number, token: string): Promise<HubMatchResult> {
-    return this.request<HubMatchResult>(`/api/matches/${matchId}/token`, {
-      method: "POST",
+  async updatePresence(presenceStatus: "online" | "offline" | "busy", clientVersion = "claw-crony/1.2.3"): Promise<HubAgentDto> {
+    return this.request<HubAgentDto>(`/api/agents/${this.registration.agentId}/presence`, {
+      method: "PUT",
       body: JSON.stringify({
-        agentId: this.registration.agentId,
-        token,
+        presenceStatus,
+        clientVersion,
       }),
     });
   }
 
-  /**
-   * Mark a match as completed (both parties have submitted tokens).
-   * @param matchId - The match ID
-   * @param token - This agent's bearer token (for authorization)
-   */
-  async completeMatch(matchId: number, token: string): Promise<HubMatchResult> {
+  async sendHandshakeMessage(
+    matchId: number,
+    params: { messageType: "offer" | "answer"; ciphertext: string; expiresAt: string },
+  ): Promise<HubHandshakeMessage> {
+    return this.request<HubHandshakeMessage>(`/api/matches/${matchId}/handshake`, {
+      method: "POST",
+      body: JSON.stringify({
+        agentId: this.registration.agentId,
+        messageType: params.messageType,
+        ciphertext: params.ciphertext,
+        expiresAt: params.expiresAt,
+      }),
+    });
+  }
+
+  async getPendingHandshakeMessages(matchId: number): Promise<HubHandshakeMessage[]> {
+    const result = await this.request<{ messages: HubHandshakeMessage[] }>(
+      `/api/matches/${matchId}/handshake/pending?agentId=${this.registration.agentId}`,
+    );
+    return result.messages ?? [];
+  }
+
+  async consumeHandshakeMessage(matchId: number, messageId: number): Promise<HubHandshakeMessage> {
+    return this.request<HubHandshakeMessage>(`/api/matches/${matchId}/handshake/${messageId}/consume`, {
+      method: "POST",
+      body: JSON.stringify({
+        agentId: this.registration.agentId,
+      }),
+    });
+  }
+
+  async markReady(matchId: number): Promise<HubMatchResult> {
+    return this.request<HubMatchResult>(`/api/matches/${matchId}/ready`, {
+      method: "POST",
+      body: JSON.stringify({
+        agentId: this.registration.agentId,
+      }),
+    });
+  }
+
+  async completeMatch(matchId: number): Promise<HubMatchResult> {
     return this.request<HubMatchResult>(`/api/matches/${matchId}/complete`, {
       method: "POST",
       body: JSON.stringify({
@@ -157,12 +165,7 @@ export class HubMatchClient {
     });
   }
 
-  /**
-   * Cancel a pending or token_exchange match.
-   * @param matchId - The match ID
-   * @param token - This agent's bearer token (for authorization)
-   */
-  async cancelMatch(matchId: number, token: string): Promise<HubMatchResult> {
+  async cancelMatch(matchId: number): Promise<HubMatchResult> {
     return this.request<HubMatchResult>(`/api/matches/${matchId}/cancel`, {
       method: "POST",
       body: JSON.stringify({

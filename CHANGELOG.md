@@ -2,6 +2,19 @@
 
 All notable changes will be documented in this file.
 
+## [1.2.4] - 2026-04-14
+
+### Added
+- Added local long-term identity storage (`client_id + public_key`) for Hub registration and encrypted handshake flows.
+- Added encrypted handshake payload generation, decryption, and temporary inbound token issuance for match-based peer connection bootstrap.
+- Added Hub presence updates on startup and shutdown.
+
+### Changed
+- Switched Hub registration from `address + token` to `client_id + public_key`.
+- Switched Hub matchmaking from legacy token exchange to encrypted handshake message exchange.
+- Updated `a2a_match_request` to create a match, send an encrypted offer, wait for an encrypted answer, and return temporary peer connection details.
+- Updated provider-side pending match polling to consume handshake messages and answer them automatically.
+
 ## [1.2.3] - 2026-04-07
 
 ### Changed

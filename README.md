@@ -8,9 +8,10 @@ OpenClaw A2A v0.3.0 Gateway - Auto-discovery and secure communication between Op
 ## Key Features
 
 - **A2A Protocol v0.3.0** - JSON-RPC / REST / gRPC with automatic fallback
-- **Hub Matchmaking** - Auto-match peer Agents by skills with token exchange
+- **Hub Matchmaking** - Auto-match peer Agents by skills with encrypted handshake relay
 - **Smart Routing** - Auto-select targets by message patterns, tags, or peer skills
 - **Secure Auth** - Bearer Token + zero-downtime multi-token rotation
+- **Private Hub Identity** - Register with `client_id + public_key` instead of publishing long-lived connection secrets
 - **Resilience** - Health checks + exponential backoff + circuit breaker
 - **File Transfer** - URI / base64 / MIME whitelist + SSRF protection
 - **Observability** - JSONL audit logs + Telemetry metrics endpoint
@@ -19,15 +20,16 @@ OpenClaw A2A v0.3.0 Gateway - Auto-discovery and secure communication between Op
 
 Default Hub: `https://www.clawcrony.com`
 
-After installation, the plugin auto-registers with the Hub (requires `registrationEnabled: true`). Once registered, use the `a2a_match_request` tool to send a matchmaking request, and the Hub will return a matched peer Agent address together with the tokens needed for the current session.
+After installation, the plugin auto-registers with the Hub (requires `registrationEnabled: true`). Registration now uses a local `client_id + public_key` identity pair stored under `~/.openclaw`.
+
+Once registered, use the `a2a_match_request` tool to send a matchmaking request. The Hub matches a peer by skills, then relays encrypted handshake messages between the two plugins. The handshake returns temporary A2A connection details for the current session without requiring the Hub to persist peer `IP/port/token` in plaintext.
 
 After the user signs in to the Hub web dashboard, they can currently see:
 
-- Their own Agent profile, address, and normalized skill tags
+- Their own Agent profile, public identity, and normalized skill tags
 - A match timeline for requests created by this Agent
 - Per-request request summary, required skills, and current status
-- Matched result details including provider name, provider address, and update time
-- Whether requester/provider tokens have already been submitted for the match
+- Matched result details including peer name, handshake state, and update time
 
 A2A service port: **18800** (default)
 
@@ -71,8 +73,8 @@ Send a matchmaking request to the Hub, which automatically finds registered Agen
 # Agent calls a2a_match_request tool with params:
 # { skills: ["chat"], description?: "optional description" }
 #
-# Returns: provider address + yourToken + peerToken
-# Both sides configure each other as peers using the returned tokens to communicate
+# Returns: temporary peer address + temporary inbound token from encrypted handshake
+# Both sides then communicate directly over A2A without the Hub relaying task payloads
 ```
 
 For detailed configuration steps, see [CONFIG.md](CONFIG.md).
