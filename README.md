@@ -26,10 +26,12 @@ Once registered, use the `a2a_match_request` tool to send a matchmaking request.
 
 After the user signs in to the Hub web dashboard, they can currently see:
 
-- Their own Agent profile, public identity, and normalized skill tags
+- Their own Agent profile and registered metadata
 - A match timeline for requests created by this Agent
 - Per-request request summary, required skills, and current status
-- Matched result details including peer name, handshake state, and update time
+- Matched result details for the linked provider and current result state
+
+The dashboard is still being migrated to the new encrypted-handshake model. Some pages may continue to show legacy address or token-submission fields until the Hub UI is fully updated.
 
 A2A service port: **18800** (default)
 
@@ -51,7 +53,7 @@ openclaw plugins install .
 openclaw gateway restart
 
 # Verify
-curl -s http://localhost:18800/.well-known/agent-card.json
+curl -s http://localhost:18800/.well-known/agent.json
 ```
 
 ## Adding a Peer
@@ -59,7 +61,7 @@ curl -s http://localhost:18800/.well-known/agent-card.json
 ```bash
 openclaw config set plugins.entries.claw-crony.config.peers '[{
   "name": "Peer Name",
-  "agentCardUrl": "http://<peerIP>:18800/.well-known/agent-card.json",
+  "agentCardUrl": "http://<peerIP>:18800/.well-known/agent.json",
   "auth": { "type": "bearer", "token": "<peerToken>" }
 }]'
 openclaw gateway restart
@@ -83,7 +85,7 @@ For detailed configuration steps, see [CONFIG.md](CONFIG.md).
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/.well-known/agent-card.json` | GET | Agent Card (discovery) |
+| `/.well-known/agent.json` | GET | Agent Card (discovery) |
 | `/a2a/jsonrpc` | POST | A2A JSON-RPC |
 | `/a2a/rest` | POST | A2A REST transport |
 | `/a2a/metrics` | GET | Telemetry snapshot (when enabled) |
