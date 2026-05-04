@@ -1,307 +1,298 @@
-# Claw Crony — Detailed Configuration Guide
+# Claw Crony Configuration Guide
 
-This document contains the complete installation and configuration steps for Claw Crony.
+This document describes the current OpenClaw-facing configuration for `claw-crony`.
 
-## Prerequisites
+## Requirements
 
-- **OpenClaw** ≥ 2026.3.0 installed and running
-- **Network connectivity** between servers (Tailscale, LAN, or public IP)
-- **Node.js** ≥ 22
+- OpenClaw 2026.5.2 or newer
+- Node.js 22 or newer
+- Network reachability between A2A peers when using direct peer calls
 
-## Installation Steps
+## Install
 
-### 1. Clone the Plugin
-
-```bash
-mkdir -p ~/.openclaw/workspace/plugins
-cd ~/.openclaw/workspace/plugins
-git clone https://github.com/ccccl8/claw-crony.git claw-crony
-cd claw-crony
-npm install --production
-```
-
-### 2. Register the Plugin in OpenClaw
+Use OpenClaw's plugin installer so the manifest and install registry are updated
+correctly.
 
 ```bash
-# Add to allowlist
-openclaw config set plugins.allow '["telegram", "claw-crony"]'
-
-# Set plugin path
-openclaw config set plugins.load.paths '["<absolute-plugin-path>/plugins/claw-crony"]'
-
-# Enable plugin
-openclaw config set plugins.entries.claw-crony.enabled true
+openclaw plugins install git:github.com/ccccl8/claw-crony.git
+openclaw plugins inspect claw-crony
+openclaw plugins inspect claw-crony --runtime
+openclaw gateway restart
 ```
 
-> **Note:** Replace `<absolute-plugin-path>` with the actual path, e.g., `/home/ubuntu/.openclaw/workspace/plugins/claw-crony`.
-
-### 3. Configure Agent Card
-
-Every A2A Agent needs an Agent Card that describes itself. If you skip this step, the plugin uses these defaults:
-
-| Field | Default |
-|-------|---------|
-| `agentCard.name` | `OpenClaw A2A Gateway` |
-| `agentCard.description` | `A2A bridge for OpenClaw agents` |
-| `agentCard.skills` | `[{id:"chat",name:"chat",description:"Chat bridge"}]` |
-
-Custom configuration:
+For local development from a checkout:
 
 ```bash
-openclaw config set plugins.entries.claw-crony.config.agentCard.name 'My Agent'
-openclaw config set plugins.entries.claw-crony.config.agentCard.description 'My OpenClaw A2A Agent'
-openclaw config set plugins.entries.claw-crony.config.agentCard.url 'http://<yourIP>:18800/a2a/jsonrpc'
-openclaw config set plugins.entries.claw-crony.config.agentCard.skills '[{"id":"chat","name":"chat","description":"Chat bridge"}]'
+cd /absolute/path/to/claw-crony
+npm install
+openclaw plugins install -l /absolute/path/to/claw-crony
+openclaw plugins inspect claw-crony --runtime
+openclaw gateway restart
 ```
 
-> **Important:** Replace `<yourIP>` with an IP reachable by peers (Tailscale IP, LAN IP, or public IP).
+Pass the plugin root directory, the directory that contains
+`openclaw.plugin.json` and `package.json`. Do not pass the parent `plugins/`
+directory.
 
-### 4. Configure A2A Server
+## What OpenClaw Handles Automatically
+
+After installation through `openclaw plugins install`, OpenClaw can discover
+these items from `openclaw.plugin.json` and `package.json`:
+
+| Item | Source | User action |
+|------|--------|-------------|
+| Plugin id `claw-crony` | `openclaw.plugin.json` | None |
+| Plugin version `1.2.4` | `openclaw.plugin.json` / `package.json` | None |
+| Startup activation | `activation.onStartup` | None |
+| Agent tools | `contracts.tools` | None |
+| Tools `a2a_send_file`, `a2a_match_request` | Runtime registration + manifest contract | None |
+| OpenClaw compatibility | `package.json#openclaw.compat` | None |
+| Plugin entrypoint | `package.json#openclaw.extensions` | None |
+| Install registry metadata | OpenClaw plugin installer | None |
+| `plugins.entries.claw-crony.enabled` | OpenClaw plugin installer/enable flow | Usually none |
+| `plugins.allow` update | OpenClaw plugin installer, when allowlist is configured | Usually none |
+
+The plugin also has runtime defaults, so an empty
+`plugins.entries.claw-crony.config` is valid. You only need to add values that
+are environment-specific, especially public/reachable addresses and security
+tokens.
+
+## Minimal User Configuration
+
+For a real multi-machine setup, set at least:
 
 ```bash
-openclaw config set plugins.entries.claw-crony.config.server.host '0.0.0.0'
-openclaw config set plugins.entries.claw-crony.config.server.port 18800
+openclaw config set plugins.entries.claw-crony.config.agentCard.name "My Agent"
+openclaw config set plugins.entries.claw-crony.config.agentCard.url "http://<reachable-host>:18800/a2a/jsonrpc"
+openclaw config set plugins.entries.claw-crony.config.routing.defaultAgentId "main"
 ```
 
-### 5. Configure Security Auth (Recommended)
+`agentCard.url` should use an address reachable by peer machines and the Hub:
+Tailscale IP, LAN IP, public DNS name, or reverse-proxy URL. If omitted, the
+plugin can fall back to localhost, which is only useful for local testing.
 
-Generate inbound auth token:
+If the A2A server is reachable outside the machine, enable bearer auth:
 
 ```bash
 TOKEN=$(openssl rand -hex 24)
-echo "Your A2A Token: $TOKEN"
-
-openclaw config set plugins.entries.claw-crony.config.security.inboundAuth 'bearer'
+openclaw config set plugins.entries.claw-crony.config.security.inboundAuth "bearer"
 openclaw config set plugins.entries.claw-crony.config.security.token "$TOKEN"
 ```
 
-> **Keep this token safe** — peers need it to connect to you.
-
-### 6. Configure Agent Routing
+For zero-downtime token rotation, use `security.tokens` alongside or instead of
+`security.token`:
 
 ```bash
-openclaw config set plugins.entries.claw-crony.config.routing.defaultAgentId 'main'
+openclaw config set plugins.entries.claw-crony.config.security.tokens '["old-token","new-token"]'
 ```
 
-### 7. Configure Hub (Optional)
+## Hub Configuration
 
-The plugin registers with `https://www.factormining.cn` by default:
+Hub integration is enabled by default and points to `https://www.clawcrony.com`.
+Normally you do not need to set these values.
 
 ```bash
-openclaw config set plugins.entries.claw-crony.config.hub.url 'https://www.factormining.cn'
+openclaw config set plugins.entries.claw-crony.config.hub.url "https://www.clawcrony.com"
 openclaw config set plugins.entries.claw-crony.config.hub.enabled true
 openclaw config set plugins.entries.claw-crony.config.hub.registrationEnabled true
-
-# Optional: registration info (required for web dashboard login)
-openclaw config set plugins.entries.claw-crony.config.registration.username 'your-username'
-openclaw config set plugins.entries.claw-crony.config.registration.email 'your@email.com'
-openclaw config set plugins.entries.claw-crony.config.registration.password 'your-password'
 ```
 
-### 8. Restart Gateway
+Optional dashboard registration fields:
 
 ```bash
-openclaw gateway restart
+openclaw config set plugins.entries.claw-crony.config.registration.username "your-username"
+openclaw config set plugins.entries.claw-crony.config.registration.email "your@email.com"
+openclaw config set plugins.entries.claw-crony.config.registration.password "your-password"
 ```
 
-### 9. Verify
+`registration.password` is only needed if you want the plugin to create the Hub
+dashboard login for you. If omitted, the Agent still registers with the Hub and
+you can create the dashboard account in the Hub UI.
+
+`registration.clientId` is optional. If omitted, `claw-crony` generates a stable
+local identity and stores it under the OpenClaw config directory. Set this only
+when you intentionally need to pin the Hub client id:
 
 ```bash
-# Check if Agent Card is accessible
-curl -s http://localhost:18800/.well-known/agent-card.json
+openclaw config set plugins.entries.claw-crony.config.registration.clientId "my-stable-client-id"
 ```
 
-## Full Example: Pairing Two Servers
+## Direct Peer Configuration
 
-### Server A Configuration
+Manual peers are only required for fixed direct routing. Hub matchmaking can
+discover a provider and exchange temporary connection details without manually
+pre-populating `peers`.
 
 ```bash
-# Generate A's token
-A_TOKEN=$(openssl rand -hex 24)
-echo "Server A Token: $A_TOKEN"
-
-# Configure A2A
-openclaw config set plugins.entries.claw-crony.config.agentCard.name 'Server-A'
-openclaw config set plugins.entries.claw-crony.config.agentCard.url 'http://100.10.10.1:18800/a2a/jsonrpc'
-openclaw config set plugins.entries.claw-crony.config.agentCard.skills '[{"id":"chat","name":"chat","description":"Chat bridge"}]'
-openclaw config set plugins.entries.claw-crony.config.server.host '0.0.0.0'
-openclaw config set plugins.entries.claw-crony.config.server.port 18800
-openclaw config set plugins.entries.claw-crony.config.security.inboundAuth 'bearer'
-openclaw config set plugins.entries.claw-crony.config.security.token "$A_TOKEN"
-openclaw config set plugins.entries.claw-crony.config.routing.defaultAgentId 'main'
-
-# Add B as peer (using B's token)
-openclaw config set plugins.entries.claw-crony.config.peers '[{"name":"Server-B","agentCardUrl":"http://100.10.10.2:18800/.well-known/agent-card.json","auth":{"type":"bearer","token":"<B_TOKEN>"}}]'
-
-openclaw gateway restart
+openclaw config set plugins.entries.claw-crony.config.peers '[
+  {
+    "name": "Server-B",
+    "agentCardUrl": "http://100.10.10.2:18800/.well-known/agent-card.json",
+    "auth": { "type": "bearer", "token": "<B_TOKEN>" }
+  }
+]'
 ```
 
-### Server B Configuration
+The plugin also serves `/.well-known/agent.json` as a compatibility alias, but
+`/.well-known/agent-card.json` is the preferred SDK discovery path.
+
+## Routing Rules
+
+`routing.defaultAgentId` selects the local OpenClaw agent that should receive
+inbound A2A messages. `routing.rules` can choose an outbound peer for
+`a2a.send` when the caller does not provide an explicit peer.
 
 ```bash
-# Generate B's token
-B_TOKEN=$(openssl rand -hex 24)
-echo "Server B Token: $B_TOKEN"
-
-# Configure A2A
-openclaw config set plugins.entries.claw-crony.config.agentCard.name 'Server-B'
-openclaw config set plugins.entries.claw-crony.config.agentCard.url 'http://100.10.10.2:18800/a2a/jsonrpc'
-openclaw config set plugins.entries.claw-crony.config.agentCard.skills '[{"id":"chat","name":"chat","description":"Chat bridge"}]'
-openclaw config set plugins.entries.claw-crony.config.server.host '0.0.0.0'
-openclaw config set plugins.entries.claw-crony.config.server.port 18800
-openclaw config set plugins.entries.claw-crony.config.security.inboundAuth 'bearer'
-openclaw config set plugins.entries.claw-crony.config.security.token "$B_TOKEN"
-openclaw config set plugins.entries.claw-crony.config.routing.defaultAgentId 'main'
-
-# Add A as peer (using A's token)
-openclaw config set plugins.entries.claw-crony.config.peers '[{"name":"Server-A","agentCardUrl":"http://100.10.10.1:18800/.well-known/agent-card.json","auth":{"type":"bearer","token":"<A_TOKEN>"}}]'
-
-openclaw gateway restart
+openclaw config set plugins.entries.claw-crony.config.routing.defaultAgentId "main"
+openclaw config set plugins.entries.claw-crony.config.routing.rules '[
+  {
+    "name": "code-review-to-server-b",
+    "match": { "skills": ["code_review"], "pattern": "review|diff|pull request" },
+    "target": { "peer": "Server-B", "agentId": "main" },
+    "priority": 10
+  }
+]'
 ```
+
+## Optional OpenClaw Hook Fallback
+
+The plugin now registers native OpenClaw lifecycle hooks:
+
+- `gateway_start`
+- `gateway_stop`
+
+No user configuration is required for these lifecycle hooks.
+
+There is also a legacy `/hooks/wake` fallback used only when normal Gateway RPC
+dispatch fails. To allow that fallback, configure OpenClaw's global hook token,
+not the plugin config:
+
+```bash
+openclaw config set hooks.token "<shared-hook-token>"
+```
+
+Leave `hooks.token` unset if you do not use the legacy wake fallback.
 
 ## Configuration Reference
 
-| Config Path | Type | Default | Description |
-|-------------|------|---------|-------------|
-| `agentCard.name` | string | `OpenClaw A2A Gateway` | Agent display name |
-| `agentCard.description` | string | `A2A bridge for OpenClaw agents` | Human-readable description |
-| `agentCard.url` | string | auto | JSON-RPC endpoint URL |
-| `agentCard.skills` | array | `[{chat}]` | List of skills offered by the Agent |
-| `server.host` | string | `0.0.0.0` | Bind address |
-| `server.port` | number | `18800` | A2A service port |
-| `hub.url` | string | `https://www.factormining.cn` | Hub server URL |
-| `hub.enabled` | boolean | `true` | Enable Hub integration |
-| `hub.registrationEnabled` | boolean | `true` | Auto-register with Hub |
-| `registration.username` | string | agent name | Web dashboard login username |
-| `registration.email` | string | — | Agent owner email |
-| `registration.password` | string | — | Web dashboard login password. If omitted, visit Hub Web UI to register manually (recommended to avoid storing password in plaintext). |
-| `storage.tasksDir` | string | `~/.openclaw/a2a-tasks` | Disk-persisted task directory |
-| `peers` | array | `[]` | List of peer Agents |
-| `peers[].name` | string | *required* | Peer display name |
-| `peers[].agentCardUrl` | string | *required* | Peer Agent Card URL |
-| `peers[].auth.type` | string | — | `bearer` or `apiKey` |
-| `peers[].auth.token` | string | — | Auth token |
-| `security.inboundAuth` | string | `none` | `none` or `bearer` |
-| `security.token` | string | — | Inbound auth token |
-| `routing.defaultAgentId` | string | `default` | Agent ID to route inbound messages to |
-| `timeouts.agentResponseTimeoutMs` | number | `300000` | Max wait time for Agent response (ms) |
-| `limits.maxConcurrentTasks` | number | `4` | Max concurrent inbound tasks |
-| `limits.maxQueuedTasks` | number | `100` | Max queued inbound tasks before rejection |
-| `observability.structuredLogs` | boolean | `true` | Output JSON structured logs |
-| `observability.exposeMetricsEndpoint` | boolean | `true` | Expose telemetry snapshot via HTTP |
-| `observability.metricsPath` | string | `/a2a/metrics` | Telemetry snapshot HTTP path |
-| `resilience.healthCheck.enabled` | boolean | `true` | Enable health checks |
-| `resilience.retry.maxRetries` | number | `3` | Max retry attempts |
-| `resilience.circuitBreaker.failureThreshold` | number | `5` | Failures before circuit breaker opens |
+All plugin-owned values live under:
 
-## Network Configuration
-
-### Option A: Tailscale (Recommended)
-
-[Tailscale](https://tailscale.com/) creates a secure mesh network between servers without firewall configuration.
-
-```bash
-# Install on both servers
-curl -fsSL https://tailscale.com/install.sh | sh
-
-# Authenticate with the same account
-sudo tailscale up
-
-# Check status
-tailscale status
-# You'll see each machine's 100.x.x.x IP
-
-# Test connectivity
-ping <peer-Tailscale-IP>
+```text
+plugins.entries.claw-crony.config
 ```
 
-Use the `100.x.x.x` Tailscale IP in A2A config. Traffic is end-to-end encrypted.
+| Config path | Type | Default | Notes |
+|-------------|------|---------|-------|
+| `agentCard.name` | string | `OpenClaw A2A Gateway` | Display name published in the Agent Card and Hub registration. |
+| `agentCard.description` | string | `A2A bridge for OpenClaw agents` | Human-readable Agent description. |
+| `agentCard.url` | string | derived from server config | Public JSON-RPC endpoint. Set this for remote peers and Hub matchmaking. |
+| `agentCard.skills` | array | `[{id:"chat",name:"chat",description:"Chat bridge"}]` | Skills sent to the Hub and exposed in the Agent Card. |
+| `hub.url` | string | `https://www.clawcrony.com` | Hub API base URL. |
+| `hub.enabled` | boolean | `true` | Enables Hub presence, matchmaking, and pending-match polling. |
+| `hub.registrationEnabled` | boolean | `true` | Registers or confirms this Agent with the Hub on startup. |
+| `registration.username` | string | agent name | Optional Hub dashboard username. |
+| `registration.email` | string | empty | Optional Hub dashboard email. |
+| `registration.password` | string | empty | Optional Hub dashboard password. Sensitive. |
+| `registration.clientId` | string | generated and persisted | Optional stable Hub client id override. |
+| `server.host` | string | `0.0.0.0` | A2A HTTP/gRPC bind host. |
+| `server.port` | number | `18800` | A2A HTTP port. gRPC uses `server.port + 1`. |
+| `storage.tasksDir` | string | `~/.openclaw/a2a-tasks` | Durable A2A task store. Relative paths are resolved by OpenClaw/plugin path handling. |
+| `storage.taskTtlHours` | number | `72` | Terminal task retention period. Minimum `1`. |
+| `storage.cleanupIntervalMinutes` | number | `60` | Task cleanup interval. Minimum `1`. |
+| `peers` | array | `[]` | Static direct peer list. Optional when using Hub matchmaking. |
+| `peers[].name` | string | required | Peer display/routing name. |
+| `peers[].agentCardUrl` | string | required | Peer Agent Card URL. Prefer `/.well-known/agent-card.json`. |
+| `peers[].auth.type` | string | optional | `bearer` or `apiKey`. |
+| `peers[].auth.token` | string | optional | Token sent to the peer. Sensitive. |
+| `security.inboundAuth` | string | `none` | `none` or `bearer`. Use `bearer` for non-local exposure. |
+| `security.token` | string | empty | Single inbound bearer token. Sensitive. |
+| `security.tokens` | string[] | `[]` | Multiple inbound tokens for rotation. Sensitive. |
+| `security.allowedMimeTypes` | string[] | image, PDF, text, JSON, audio, video | MIME allowlist for inbound and outbound file parts. Supports wildcards such as `image/*`. |
+| `security.maxFileSizeBytes` | number | `52428800` | Max URI-based outbound file size, 50 MB by default. |
+| `security.maxInlineFileSizeBytes` | number | `10485760` | Max inline base64 file size, 10 MB by default. |
+| `security.fileUriAllowlist` | string[] | `[]` | Optional hostname allowlist for outbound file URIs. Empty means public hosts are allowed after SSRF checks. |
+| `routing.defaultAgentId` | string | `default` | Local OpenClaw agent id for inbound A2A dispatch. |
+| `routing.rules` | array | `[]` | Optional outbound routing rules for `a2a.send`. |
+| `limits.maxConcurrentTasks` | number | `4` | Max concurrently running inbound tasks. |
+| `limits.maxQueuedTasks` | number | `100` | Max queued inbound tasks before rejection. |
+| `observability.structuredLogs` | boolean | `true` | Emits structured JSON-like log entries. |
+| `observability.exposeMetricsEndpoint` | boolean | `true` | Exposes metrics over HTTP. |
+| `observability.metricsPath` | string | `/a2a/metrics` | Metrics endpoint path. |
+| `observability.metricsAuth` | string | `none` | `none` or `bearer`; bearer reuses `security.token`/`security.tokens`. |
+| `observability.auditLogPath` | string | `~/.openclaw/a2a-audit.jsonl` | JSONL audit log path. |
+| `timeouts.agentResponseTimeoutMs` | number | `300000` | Max wait for an OpenClaw Agent response in blocking mode. |
+| `resilience.healthCheck.enabled` | boolean | `true` | Enables peer health checks for static peers. |
+| `resilience.healthCheck.intervalMs` | number | `30000` | Peer health check interval. |
+| `resilience.healthCheck.timeoutMs` | number | `5000` | Peer health check timeout. |
+| `resilience.retry.maxRetries` | number | `3` | Retry attempts for retryable outbound peer errors. |
+| `resilience.retry.baseDelayMs` | number | `1000` | Initial retry delay. |
+| `resilience.retry.maxDelayMs` | number | `10000` | Maximum retry delay. |
+| `resilience.circuitBreaker.failureThreshold` | number | `5` | Consecutive failures before opening a peer circuit. |
+| `resilience.circuitBreaker.resetTimeoutMs` | number | `30000` | Time before an open peer circuit enters half-open mode. |
 
-### Option B: LAN
-
-If both servers are on the same LAN, use the internal IP directly. Ensure port 18800 is accessible.
-
-### Option C: Public IP
-
-Use public IP + Bearer Token auth. Recommended to restrict source IPs with a firewall.
-
-## Troubleshooting
-
-### "Request accepted (no agent dispatch available)"
-
-This means the A2A gateway received the request but the underlying OpenClaw agent execution didn't complete successfully.
-
-Common causes:
-
-1) **Target OpenClaw instance has no AI Provider configured**.
+## Full Example
 
 ```bash
-openclaw config get auth.profiles
-```
+TOKEN=$(openssl rand -hex 24)
 
-2) **Task took too long and caused dispatch timeout**.
+openclaw plugins install git:github.com/ccccl8/claw-crony.git
 
-Solutions:
-- Use async task mode on the sender: `--non-blocking --wait`
-- Or increase plugin timeout: `plugins.entries.claw-crony.config.timeouts.agentResponseTimeoutMs` (default 300000)
+openclaw config set plugins.entries.claw-crony.config.agentCard.name "Server-A"
+openclaw config set plugins.entries.claw-crony.config.agentCard.description "Server A OpenClaw A2A agent"
+openclaw config set plugins.entries.claw-crony.config.agentCard.url "http://100.10.10.1:18800/a2a/jsonrpc"
+openclaw config set plugins.entries.claw-crony.config.agentCard.skills '["chat","reasoning","code_review"]'
+openclaw config set plugins.entries.claw-crony.config.routing.defaultAgentId "main"
+openclaw config set plugins.entries.claw-crony.config.security.inboundAuth "bearer"
+openclaw config set plugins.entries.claw-crony.config.security.token "$TOKEN"
 
-### Agent Card Returns 404
-
-Plugin not loaded. Check:
-
-```bash
-# Confirm plugin is in allowlist
-openclaw config get plugins.allow
-
-# Confirm load path is correct
-openclaw config get plugins.load.paths
-
-# Check gateway logs
-cat /tmp/openclaw/openclaw-$(date +%Y-%m-%d).log | grep claw
-```
-
-### Port 18800 Connection Refused
-
-```bash
-# Check if A2A service is listening
-ss -tlnp | grep 18800
-
-# If not, restart gateway
 openclaw gateway restart
 ```
 
-### Peer Auth Failed
-
-Ensure the token in your peer config exactly matches the target server's `security.token`.
-
-## Hub Match Flow
-
-1. **Register**: Plugin auto-registers with Hub (`https://www.factormining.cn`) on startup, saves `~/.openclaw/a2a-registration.json`
-2. **发起匹配**: Agent calls `a2a_match_request` tool with required skills list
-3. **Token Exchange**: Hub returns provider address and temporary token
-4. **Configure Peer**: Both sides configure each other as peers
-5. **Communicate**: Communicate via A2A protocol
-
-## Send Messages via A2A (CLI)
+## Verify
 
 ```bash
-node <plugin-path>/skill/scripts/a2a-send.mjs \
-  --peer-url http://<peerIP>:18800 \
-  --token <peerToken> \
-  --message "Hello from Server A!"
+openclaw plugins inspect claw-crony
+openclaw plugins inspect claw-crony --runtime
+curl -s http://localhost:18800/.well-known/agent-card.json
+curl -s http://localhost:18800/a2a/metrics
 ```
 
-The script uses `@a2a-js/sdk` ClientFactory to auto-discover Agent Card and select the best transport protocol.
-
-### Async Task Mode (Recommended for Long-Running Tasks)
+If `observability.metricsAuth` is `bearer`, call metrics with the inbound token:
 
 ```bash
-node <plugin-path>/skill/scripts/a2a-send.mjs \
-  --peer-url http://<peerIP>:18800 \
-  --token <peerToken> \
-  --non-blocking \
-  --wait \
-  --timeout-ms 600000 \
-  --poll-ms 1000 \
-  --message "Discuss the advantages of A2A communication in 3 rounds and give a final conclusion"
+curl -H "Authorization: Bearer $TOKEN" http://localhost:18800/a2a/metrics
 ```
+
+## Troubleshooting
+
+### Plugin is not listed
+
+```bash
+openclaw plugins registry --refresh
+openclaw plugins list
+openclaw plugins inspect claw-crony
+```
+
+If you installed from a local checkout, confirm that the path points to the
+plugin root and that `npm install` has already been run.
+
+### Agent Card is not reachable
+
+```bash
+openclaw gateway restart
+curl -s http://localhost:18800/.well-known/agent-card.json
+```
+
+If remote peers cannot reach it, set `agentCard.url` to a reachable address and
+check firewall/security-group rules for `server.port`.
+
+### "Request accepted (no agent dispatch available)"
+
+The A2A gateway accepted the task but OpenClaw did not return a final Agent
+response. Check that the target OpenClaw Agent/provider is configured and that
+the task did not exceed `timeouts.agentResponseTimeoutMs`.
+
+### Peer auth failed
+
+Make sure the sender's peer token matches the receiver's
+`security.token` or one value in `security.tokens`.

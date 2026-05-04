@@ -12,6 +12,7 @@ OpenClaw A2A v0.3.0 Gateway - Auto-discovery and secure communication between Op
 - **Smart Routing** - Auto-select targets by message patterns, tags, or peer skills
 - **Secure Auth** - Bearer Token + zero-downtime multi-token rotation
 - **Private Hub Identity** - Register with `client_id + public_key` instead of publishing long-lived connection secrets
+- **Native OpenClaw Lifecycle Hooks** - Uses `gateway_start` / `gateway_stop` for Hub registration and presence updates
 - **Resilience** - Health checks + exponential backoff + circuit breaker
 - **File Transfer** - URI / base64 / MIME whitelist + SSRF protection
 - **Observability** - JSONL audit logs + Telemetry metrics endpoint
@@ -37,35 +38,109 @@ A2A service port: **18800** (default)
 
 ## Installation
 
-### Via npm (Recommended)
+Use OpenClaw's plugin installer so the manifest and install registry are updated
+correctly. This lets OpenClaw discover the plugin id, startup activation, tool
+contracts, runtime entrypoint, and compatibility metadata.
 
 ```bash
-npm install @clawcrony/claw-crony
+openclaw plugins install git:github.com/ccccl8/claw-crony.git
+openclaw plugins inspect claw-crony
+openclaw plugins inspect claw-crony --runtime
+openclaw gateway restart
 ```
 
-### Via Git Clone
+For local development from a checkout:
 
 ```bash
-git clone https://github.com/ccccl8/claw-crony.git
-cd claw-crony
+cd /absolute/path/to/claw-crony
 npm install
-openclaw plugins install .
+openclaw plugins install -l /absolute/path/to/claw-crony
+openclaw plugins inspect claw-crony --runtime
 openclaw gateway restart
-
-# Verify
-curl -s http://localhost:18800/.well-known/agent.json
 ```
 
-## Adding a Peer
+Pass the plugin root directory, the directory that contains
+`openclaw.plugin.json` and `package.json`.
+
+## OpenClaw Discovery and Hooks
+
+After installation, OpenClaw reads `openclaw.plugin.json` and `package.json`
+before loading plugin runtime code. The current plugin declares:
+
+- Plugin id: `claw-crony`
+- Startup activation: `activation.onStartup`
+- Tool contracts: `a2a_send_file`, `a2a_match_request`
+- OpenClaw compatibility: `>=2026.5.2`
+- Runtime entrypoint: `./index.ts`
+
+At runtime, `claw-crony` registers native OpenClaw lifecycle hooks:
+
+- `gateway_start`: starts Hub registration/presence lifecycle
+- `gateway_stop`: marks Hub presence offline during Gateway shutdown
+
+No user configuration is required for these lifecycle hooks. The plugin also
+keeps its existing background service registration for the A2A HTTP/gRPC
+servers.
+
+There is one optional legacy fallback: if normal Gateway RPC dispatch fails,
+`claw-crony` can try OpenClaw's `/hooks/wake` endpoint. To enable that fallback,
+set OpenClaw's global hook token:
 
 ```bash
-openclaw config set plugins.entries.claw-crony.config.peers '[{
-  "name": "Peer Name",
-  "agentCardUrl": "http://<peerIP>:18800/.well-known/agent.json",
-  "auth": { "type": "bearer", "token": "<peerToken>" }
-}]'
+openclaw config set hooks.token "<shared-hook-token>"
+```
+
+Leave `hooks.token` unset if you do not use the legacy wake fallback.
+
+## Minimal Configuration
+
+The plugin has runtime defaults, so an empty
+`plugins.entries.claw-crony.config` is valid. For a real multi-machine setup,
+set the public/reachable Agent Card URL and the target local OpenClaw agent id:
+
+```bash
+openclaw config set plugins.entries.claw-crony.config.agentCard.name "My Agent"
+openclaw config set plugins.entries.claw-crony.config.agentCard.url "http://<reachable-host>:18800/a2a/jsonrpc"
+openclaw config set plugins.entries.claw-crony.config.routing.defaultAgentId "main"
+```
+
+If the A2A server is reachable outside the machine, enable bearer auth:
+
+```bash
+TOKEN=$(openssl rand -hex 24)
+openclaw config set plugins.entries.claw-crony.config.security.inboundAuth "bearer"
+openclaw config set plugins.entries.claw-crony.config.security.token "$TOKEN"
 openclaw gateway restart
 ```
+
+Useful optional settings:
+
+- `agentCard.skills`: skills sent to the Hub and exposed in the Agent Card
+- `security.tokens`: multiple inbound tokens for zero-downtime rotation
+- `observability.metricsAuth`: set to `bearer` to protect `/a2a/metrics`
+- `hub.enabled`: set to `false` to disable Hub integration
+
+For the full parameter reference, see [CONFIG.md](CONFIG.md).
+
+## Adding a Direct Peer
+
+Manual peers are only required for fixed direct routing. Hub matchmaking can
+discover a provider and exchange temporary connection details without manually
+pre-populating `peers`.
+
+```bash
+openclaw config set plugins.entries.claw-crony.config.peers '[
+  {
+    "name": "Peer Name",
+    "agentCardUrl": "http://<peerIP>:18800/.well-known/agent-card.json",
+    "auth": { "type": "bearer", "token": "<peerToken>" }
+  }
+]'
+openclaw gateway restart
+```
+
+`/.well-known/agent-card.json` is the preferred SDK discovery path. The plugin
+also serves `/.well-known/agent.json` as a compatibility alias.
 
 ## Hub Matchmaking (a2a_match_request)
 
@@ -85,7 +160,8 @@ For detailed configuration steps, see [CONFIG.md](CONFIG.md).
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/.well-known/agent.json` | GET | Agent Card (discovery) |
+| `/.well-known/agent-card.json` | GET | Agent Card (preferred SDK discovery) |
+| `/.well-known/agent.json` | GET | Agent Card compatibility alias |
 | `/a2a/jsonrpc` | POST | A2A JSON-RPC |
 | `/a2a/rest` | POST | A2A REST transport |
 | `/a2a/metrics` | GET | Telemetry snapshot (when enabled) |

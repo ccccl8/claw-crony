@@ -10,6 +10,7 @@ All notable changes will be documented in this file.
 
 ### Changed
 - Updated OpenClaw plugin SDK metadata and type imports to the 2026.5.2 plugin entrypoint conventions.
+- Reworked `CONFIG.md` and `README.md` installation/configuration guidance around OpenClaw plugin discovery.
 - Made path tests use platform-native separators on Windows and POSIX.
 
 ## [1.2.4] - 2026-04-14

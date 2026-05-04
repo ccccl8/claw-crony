@@ -70,7 +70,11 @@
         "properties": {
           "username": { "type": "string" },
           "email": { "type": "string" },
-          "password": { "type": "string" }
+          "password": { "type": "string" },
+          "clientId": {
+            "type": "string",
+            "description": "Optional stable client id for Hub registration. If omitted, claw-crony generates and persists one locally."
+          }
         }
       },
       "server": {
