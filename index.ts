@@ -597,6 +597,66 @@ const plugin = {
     let hubMatchPollingTimer: ReturnType<typeof setInterval> | null = null;
     const grpcPort = config.server.port + 1;
     const processedHubMessages = new Set<number>();
+    let hubStartupPromise: Promise<void> | null = null;
+    let hubShutdownPromise: Promise<void> | null = null;
+
+    const startHubLifecycle = (source: "gateway_start" | "service"): Promise<void> => {
+      if (config.hub?.enabled === false) {
+        return Promise.resolve();
+      }
+
+      if (!hubStartupPromise) {
+        hubStartupPromise = (async () => {
+          if (config.hub?.registrationEnabled !== false) {
+            try {
+              const reg = await runHubRegistration(api, config, config.hub!, config.registration ?? {});
+              if (reg) {
+                api.logger.info(`claw-crony: registered with hub (agentId=${reg.agentId}, source=${source})`);
+              }
+            } catch (err) {
+              api.logger.warn(`claw-crony: hub registration failed - ${err instanceof Error ? err.message : String(err)}`);
+            }
+          }
+
+          try {
+            const hubClient = await HubMatchClient.create();
+            await hubClient.updatePresence("online");
+          } catch (presenceErr) {
+            api.logger.warn(`claw-crony: failed to update hub presence - ${presenceErr instanceof Error ? presenceErr.message : String(presenceErr)}`);
+          }
+        })();
+      }
+
+      return hubStartupPromise;
+    };
+
+    const stopHubLifecycle = (source: "gateway_stop" | "service"): Promise<void> => {
+      if (config.hub?.enabled === false) {
+        return Promise.resolve();
+      }
+
+      if (!hubShutdownPromise) {
+        hubShutdownPromise = (async () => {
+          try {
+            const hubClient = await HubMatchClient.create();
+            await hubClient.updatePresence("offline");
+            api.logger.info(`claw-crony: hub presence set offline (source=${source})`);
+          } catch {
+            // Ignore best-effort presence shutdown failure.
+          }
+        })();
+      }
+
+      return hubShutdownPromise;
+    };
+
+    api.on("gateway_start", async () => {
+      await startHubLifecycle("gateway_start");
+    }, { priority: 50 });
+
+    api.on("gateway_stop", async () => {
+      await stopHubLifecycle("gateway_stop");
+    }, { priority: 50 });
 
     api.registerGatewayMethod("a2a.metrics", ({ respond }) => {
       respond(true, {
@@ -704,6 +764,18 @@ const plugin = {
           agentId: { type: "string" as const, description: "Route to a specific agentId on the peer (OpenClaw extension). Omit to use the peer's default agent." },
         },
       };
+      type SendFileToolParams = {
+        peer: string;
+        uri: string;
+        name?: string;
+        mimeType?: string;
+        text?: string;
+        agentId?: string;
+      };
+      type MatchRequestToolParams = {
+        skills: string[];
+        description?: string;
+      };
 
       api.registerTool({
         name: "a2a_send_file",
@@ -712,17 +784,18 @@ const plugin = {
         label: "A2A Send File",
         parameters: sendFileParams,
         async execute(toolCallId, params) {
-          const peer = config.peers.find((p) => p.name === params.peer);
+          const input = params as SendFileToolParams;
+          const peer = config.peers.find((p) => p.name === input.peer);
           if (!peer) {
             const available = config.peers.map((p) => p.name).join(", ") || "(none)";
             return {
-              content: [{ type: "text" as const, text: `Peer not found: "${params.peer}". Available peers: ${available}` }],
+              content: [{ type: "text" as const, text: `Peer not found: "${input.peer}". Available peers: ${available}` }],
               details: { ok: false },
             };
           }
 
           // Security checks: SSRF, MIME, file size
-          const uriCheck = await validateUri(params.uri, config.security);
+          const uriCheck = await validateUri(input.uri, config.security);
           if (!uriCheck.ok) {
             return {
               content: [{ type: "text" as const, text: `URI rejected: ${uriCheck.reason}` }],
@@ -730,30 +803,30 @@ const plugin = {
             };
           }
 
-          if (params.mimeType && !validateMimeType(params.mimeType, config.security.allowedMimeTypes)) {
+          if (input.mimeType && !validateMimeType(input.mimeType, config.security.allowedMimeTypes)) {
             return {
-              content: [{ type: "text" as const, text: `MIME type rejected: "${params.mimeType}" is not in the allowed list` }],
+              content: [{ type: "text" as const, text: `MIME type rejected: "${input.mimeType}" is not in the allowed list` }],
               details: { ok: false },
             };
           }
 
           const parts: Array<Record<string, unknown>> = [];
-          if (params.text) {
-            parts.push({ kind: "text", text: params.text });
+          if (input.text) {
+            parts.push({ kind: "text", text: input.text });
           }
           parts.push({
             kind: "file",
             file: {
-              uri: params.uri,
-              ...(params.name ? { name: params.name } : {}),
-              ...(params.mimeType ? { mimeType: params.mimeType } : {}),
+              uri: input.uri,
+              ...(input.name ? { name: input.name } : {}),
+              ...(input.mimeType ? { mimeType: input.mimeType } : {}),
             },
           });
 
           try {
             const message: Record<string, unknown> = { parts };
-            if (params.agentId) {
-              message.agentId = params.agentId;
+            if (input.agentId) {
+              message.agentId = input.agentId;
             }
             const result = await client.sendMessage(peer, message, {
               healthManager: healthManager ?? undefined,
@@ -761,18 +834,18 @@ const plugin = {
             });
             if (result.ok) {
               return {
-                content: [{ type: "text" as const, text: `File sent to ${params.peer} via A2A.\nURI: ${params.uri}\nResponse: ${JSON.stringify(result.response)}` }],
+                content: [{ type: "text" as const, text: `File sent to ${input.peer} via A2A.\nURI: ${input.uri}\nResponse: ${JSON.stringify(result.response)}` }],
                 details: { ok: true, response: result.response },
               };
             }
             return {
-              content: [{ type: "text" as const, text: `Failed to send file to ${params.peer}: ${JSON.stringify(result.response)}` }],
+              content: [{ type: "text" as const, text: `Failed to send file to ${input.peer}: ${JSON.stringify(result.response)}` }],
               details: { ok: false, response: result.response },
             };
           } catch (err: unknown) {
             const msg = err instanceof Error ? err.message : String(err);
             return {
-              content: [{ type: "text" as const, text: `Error sending file to ${params.peer}: ${msg}` }],
+              content: [{ type: "text" as const, text: `Error sending file to ${input.peer}: ${msg}` }],
               details: { ok: false, error: msg },
             };
           }
@@ -806,6 +879,7 @@ const plugin = {
           },
         },
         async execute(toolCallId, params) {
+          const input = params as MatchRequestToolParams;
           let hubClient: HubMatchClient;
           try {
             hubClient = await HubMatchClient.create();
@@ -836,8 +910,8 @@ const plugin = {
           let match: Awaited<ReturnType<HubMatchClient["createMatch"]>>;
           try {
             match = await hubClient.createMatch({
-              skills: params.skills,
-              description: params.description,
+              skills: input.skills,
+              description: input.description,
             });
           } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
@@ -945,24 +1019,7 @@ const plugin = {
           return;
         }
 
-        // Hub registration (runs before server starts)
-        if (config.hub?.enabled !== false && config.hub?.registrationEnabled !== false) {
-          try {
-              const reg = await runHubRegistration(api, config, config.hub!, config.registration ?? {});
-              if (reg) {
-                api.logger.info(`claw-crony: registered with hub (agentId=${reg.agentId})`);
-                try {
-                  const hubClient = await HubMatchClient.create();
-                  await hubClient.updatePresence("online");
-                } catch (presenceErr) {
-                  api.logger.warn(`claw-crony: failed to update hub presence - ${presenceErr instanceof Error ? presenceErr.message : String(presenceErr)}`);
-                }
-              }
-          } catch (err) {
-            api.logger.warn(`claw-crony: hub registration failed — ${err instanceof Error ? err.message : String(err)}`);
-            // Continue startup anyway — hub is optional
-          }
-        }
+        await startHubLifecycle("service");
 
         // Start peer health checks
         healthManager?.start();
@@ -1070,14 +1127,7 @@ const plugin = {
         healthManager?.stop();
         auditLogger.close();
 
-        if (config.hub?.enabled !== false) {
-          try {
-            const hubClient = await HubMatchClient.create();
-            await hubClient.updatePresence("offline");
-          } catch {
-            // Ignore best-effort presence shutdown failure.
-          }
-        }
+        await stopHubLifecycle("service");
 
         // Stop task cleanup timer
         if (cleanupTimer) {

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 
 import plugin from "../index.js";
@@ -24,6 +25,20 @@ describe("zero-config install (issue #7)", () => {
     assert.ok(harness.service, "service should be registered even with empty config");
     assert.ok(harness.methods.has("a2a.send"), "a2a.send method should be registered");
     assert.ok(harness.methods.has("a2a.metrics"), "a2a.metrics method should be registered");
+  });
+
+  it("declares OpenClaw startup activation and tool contracts", () => {
+    const manifest = JSON.parse(readFileSync(new URL("../openclaw.plugin.json", import.meta.url), "utf8"));
+
+    assert.equal(manifest.activation?.onStartup, true);
+    assert.deepEqual(manifest.contracts?.tools, ["a2a_send_file", "a2a_match_request"]);
+  });
+
+  it("registers OpenClaw gateway lifecycle hooks", () => {
+    const registration = registerPlugin({});
+
+    assert.ok(registration.hooks.has("gateway_start"), "gateway_start hook should be registered");
+    assert.ok(registration.hooks.has("gateway_stop"), "gateway_stop hook should be registered");
   });
 
   it("builds Agent Card with defaults when agentCard fields are missing", () => {

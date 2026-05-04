@@ -23,9 +23,15 @@ export interface GatewayMethodResult {
   data: unknown;
 }
 
+export interface HookRegistration {
+  handler: (...args: any[]) => unknown;
+  opts?: Record<string, unknown>;
+}
+
 export interface Harness {
   methods: Map<string, (args: any) => void>;
   service: Service;
+  hooks?: Map<string, HookRegistration>;
 }
 
 // ---------------------------------------------------------------------------
@@ -205,13 +211,16 @@ export function registerPlugin(config: Record<string, unknown>) {
   let service: Service | null = null;
   const methods = new Map<string, (args: any) => void>();
   const tools = new Map<string, any>();
+  const hooks = new Map<string, HookRegistration>();
 
   plugin.register({
     pluginConfig: config,
     config: { gateway: { port: 18789 } } as any,
     runtime: {} as any,
     logger: silentLogger(),
-    on: () => {},
+    on(name: string, handler: (...args: any[]) => unknown, opts?: Record<string, unknown>) {
+      hooks.set(name, { handler, opts });
+    },
     registerGatewayMethod(name: string, handler: any) {
       methods.set(name, handler);
     },
@@ -233,7 +242,7 @@ export function registerPlugin(config: Record<string, unknown>) {
     source: "test",
   } as any);
 
-  return { service, methods, tools };
+  return { service, methods, tools, hooks };
 }
 
 // ---------------------------------------------------------------------------
@@ -241,9 +250,9 @@ export function registerPlugin(config: Record<string, unknown>) {
 // ---------------------------------------------------------------------------
 
 export function createHarness(config: Record<string, unknown>): Harness {
-  const { service, methods } = registerPlugin(config);
+  const { service, methods, hooks } = registerPlugin(config);
   assert(service, "service should be registered");
-  return { methods, service };
+  return { methods, service, hooks };
 }
 
 export async function invokeGatewayMethod(

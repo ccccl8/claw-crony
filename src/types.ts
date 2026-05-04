@@ -11,7 +11,7 @@
 // Use the official OpenClaw plugin SDK types.
 // IMPORTANT: keep these as type-only exports so the plugin has no runtime
 // dependency on OpenClaw as an npm package.
-export type { OpenClawPluginApi, PluginLogger, OpenClawConfig } from "openclaw/plugin-sdk";
+export type { OpenClawPluginApi, PluginLogger, OpenClawConfig } from "openclaw/plugin-sdk/plugin-entry";
 
 // ---------------------------------------------------------------------------
 // A2A peer / auth configuration

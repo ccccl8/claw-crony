@@ -2,6 +2,16 @@
 
 All notable changes will be documented in this file.
 
+## [Unreleased]
+
+### Added
+- Declared OpenClaw startup activation and tool contracts in `openclaw.plugin.json` for OpenClaw 2026.5.2 discovery.
+- Registered `gateway_start` and `gateway_stop` hooks so Hub registration and presence updates participate in the OpenClaw Gateway lifecycle.
+
+### Changed
+- Updated OpenClaw plugin SDK metadata and type imports to the 2026.5.2 plugin entrypoint conventions.
+- Made path tests use platform-native separators on Windows and POSIX.
+
 ## [1.2.4] - 2026-04-14
 
 ### Added

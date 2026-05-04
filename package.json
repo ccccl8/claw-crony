@@ -17,14 +17,22 @@
   "openclaw": {
     "extensions": [
       "./index.ts"
-    ]
+    ],
+    "compat": {
+      "pluginApi": ">=2026.5.2",
+      "minGatewayVersion": "2026.5.2"
+    },
+    "build": {
+      "openclawVersion": "2026.5.2",
+      "pluginSdkVersion": "2026.5.2"
+    }
   },
   "devDependencies": {
     "@types/express": "5.0.6",
     "@types/node": "25.5.0",
     "@types/supertest": "2.0.16",
     "@types/uuid": "10.0.0",
-    "openclaw": "2026.3.23",
+    "openclaw": "2026.5.2",
     "supertest": "7.2.2",
     "tsx": "4.21.0",
     "typescript": "5.9.3"
