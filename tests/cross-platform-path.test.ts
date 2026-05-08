@@ -81,3 +81,32 @@ describe("cross-platform auditLogPath default", () => {
     );
   });
 });
+
+describe("cross-platform historyLogPath default", () => {
+  it("uses ~/.openclaw/a2a-history.jsonl when no historyLogPath is configured", () => {
+    const config = parseConfig({});
+    const expected = path.join(os.homedir(), ".openclaw", "a2a-history.jsonl");
+    assert.equal(config.observability.historyLogPath, expected);
+  });
+
+  it("respects user-configured absolute path", () => {
+    const config = parseConfig({
+      observability: { historyLogPath: "/var/log/a2a-history.jsonl" },
+    });
+    assert.equal(config.observability.historyLogPath, "/var/log/a2a-history.jsonl");
+  });
+
+  it("resolves user-configured relative path to absolute", () => {
+    const config = parseConfig({
+      observability: { historyLogPath: "data/history.jsonl" },
+    });
+    assert.ok(
+      path.isAbsolute(config.observability.historyLogPath),
+      `historyLogPath should be absolute but got "${config.observability.historyLogPath}"`,
+    );
+    assert.ok(
+      config.observability.historyLogPath.endsWith(path.join("data", "history.jsonl")),
+      `should end with "${path.join("data", "history.jsonl")}" but got "${config.observability.historyLogPath}"`,
+    );
+  });
+});

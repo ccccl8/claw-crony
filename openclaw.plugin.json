@@ -2,7 +2,7 @@
   "id": "claw-crony",
   "name": "Claw Crony",
   "description": "OpenClaw A2A v0.3.0 gateway with Agent Card, JSON-RPC, REST, routing rules, transport fallback, and Hub matchmaking",
-  "version": "1.2.4",
+  "version": "1.3.0",
   "activation": {
     "onStartup": true
   },
@@ -223,6 +223,21 @@
             "type": "string",
             "default": "~/.openclaw/a2a-audit.jsonl",
             "description": "Path for the JSONL audit log file (separate from structured logs)."
+          },
+          "historyEnabled": {
+            "type": "boolean",
+            "default": true,
+            "description": "Enable operator-facing JSONL request history for match, handshake, peer, send, and file-send events."
+          },
+          "historyLogPath": {
+            "type": "string",
+            "default": "~/.openclaw/a2a-history.jsonl",
+            "description": "Path for the JSONL request history file."
+          },
+          "historyIncludeEncryptedPayloads": {
+            "type": "boolean",
+            "default": false,
+            "description": "Include encrypted handshake payload fields in request history. Tokens and secrets remain redacted."
           }
         }
       },

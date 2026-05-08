@@ -4,15 +4,21 @@ All notable changes will be documented in this file.
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-05-08
+
 ### Added
 - Declared OpenClaw startup activation and tool contracts in `openclaw.plugin.json` for OpenClaw 2026.5.2 discovery.
 - Registered `gateway_start` and `gateway_stop` hooks so Hub registration and presence updates participate in the OpenClaw Gateway lifecycle.
 - Added validation and regression coverage for encrypted handshake temporary inbound tokens.
+- Added gateway methods `a2a.match`, `a2a.peers`, and `a2a.history` for script-friendly Hub matching, peer inspection, and request history queries.
+- Added PowerShell and Bash helper scripts under `scripts/` for match, send, peers, history, diagnose, and update flows.
+- Added redacted JSONL request history for match, handshake, peer upsert, send, file-send, and inbound task events.
 
 ### Changed
 - Updated OpenClaw plugin SDK metadata and type imports to the 2026.5.2 plugin entrypoint conventions.
 - Reworked `CONFIG.md` and `README.md` installation/configuration guidance around OpenClaw plugin discovery.
 - Changed encrypted handshake temporary inbound tokens to fixed 48-character lowercase hex values and documented that they are generated locally with a TTL instead of using long-lived `security.token`.
+- Refactored `a2a_match_request` to reuse the same match/handshake implementation as the new `a2a.match` gateway method.
 - Made path tests use platform-native separators on Windows and POSIX.
 
 ## [1.2.4] - 2026-04-14

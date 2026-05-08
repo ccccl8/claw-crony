@@ -98,6 +98,9 @@ export interface GatewayConfig {
     metricsPath: string;
     metricsAuth: "none" | "bearer";
     auditLogPath: string;
+    historyEnabled: boolean;
+    historyLogPath: string;
+    historyIncludeEncryptedPayloads: boolean;
   };
   timeouts?: {
     /**

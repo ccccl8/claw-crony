@@ -42,7 +42,7 @@ these items from `openclaw.plugin.json` and `package.json`:
 | Item | Source | User action |
 |------|--------|-------------|
 | Plugin id `claw-crony` | `openclaw.plugin.json` | None |
-| Plugin version `1.2.4` | `openclaw.plugin.json` / `package.json` | None |
+| Plugin version `1.3.0` | `openclaw.plugin.json` / `package.json` | None |
 | Startup activation | `activation.onStartup` | None |
 | Agent tools | `contracts.tools` | None |
 | Tools `a2a_send_file`, `a2a_match_request` | Runtime registration + manifest contract | None |
@@ -220,6 +220,9 @@ plugins.entries.claw-crony.config
 | `observability.metricsPath` | string | `/a2a/metrics` | Metrics endpoint path. |
 | `observability.metricsAuth` | string | `none` | `none` or `bearer`; bearer reuses `security.token`/`security.tokens`. |
 | `observability.auditLogPath` | string | `~/.openclaw/a2a-audit.jsonl` | JSONL audit log path. |
+| `observability.historyEnabled` | boolean | `true` | Writes operator-facing JSONL request history for match, handshake, peer, send, and file-send events. |
+| `observability.historyLogPath` | string | `~/.openclaw/a2a-history.jsonl` | JSONL request history path. |
+| `observability.historyIncludeEncryptedPayloads` | boolean | `false` | Include encrypted handshake payload fields in request history. Tokens/secrets remain redacted. |
 | `timeouts.agentResponseTimeoutMs` | number | `300000` | Max wait for an OpenClaw Agent response in blocking mode. |
 | `resilience.healthCheck.enabled` | boolean | `true` | Enables peer health checks for static peers. |
 | `resilience.healthCheck.intervalMs` | number | `30000` | Peer health check interval. |
@@ -262,6 +265,46 @@ If `observability.metricsAuth` is `bearer`, call metrics with the inbound token:
 ```bash
 curl -H "Authorization: Bearer $TOKEN" http://localhost:18800/a2a/metrics
 ```
+
+## Gateway Methods and Scripts
+
+OpenClaw can call claw-crony directly through gateway methods. The plugin
+registers:
+
+| Method | Purpose |
+|--------|---------|
+| `a2a.match` | Creates a Hub match and performs the encrypted handshake. Same core logic as `a2a_match_request`. |
+| `a2a.peers` | Lists current configured and runtime-discovered peers with tokens redacted. |
+| `a2a.history` | Reads recent request history with optional filters: `count`, `type`, `status`, `direction`, `matchId`, `peer`. |
+| `a2a.send` | Sends a message to a direct or Hub-discovered peer. |
+| `a2a.audit` | Reads the lower-level audit log. |
+| `a2a.metrics` | Returns telemetry metrics. |
+
+Convenience scripts are available in `scripts/`:
+
+```powershell
+.\scripts\a2a-match.ps1 -Skills chat,code_review -Description "Need code review"
+.\scripts\a2a-peers.ps1
+.\scripts\a2a-send.ps1 -Peer "Provider Name" -Text "hello" -AgentId "main"
+.\scripts\a2a-history.ps1 -Count 20 -MatchId 123
+.\scripts\a2a-diagnose.ps1
+.\scripts\a2a-update.ps1
+```
+
+```bash
+./scripts/a2a-match.sh chat,code_review "Need code review"
+./scripts/a2a-peers.sh
+./scripts/a2a-send.sh "Provider Name" "hello" main
+./scripts/a2a-history.sh 20 handshake.answer_received 123
+./scripts/a2a-diagnose.sh
+./scripts/a2a-update.sh
+```
+
+History entries redact `token`, `secret`, `password`, `authorization`, and
+`ciphertext` fields by default. Leave
+`observability.historyIncludeEncryptedPayloads=false` unless you are debugging a
+Hub handshake issue and understand that encrypted payloads may still be
+sensitive metadata.
 
 ## Troubleshooting
 

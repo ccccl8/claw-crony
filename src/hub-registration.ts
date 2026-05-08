@@ -202,7 +202,7 @@ export async function runHubRegistration(
     clientId: identity.clientId,
     publicKey: identity.publicKey,
     keyVersion: identity.keyVersion,
-    clientVersion: "claw-crony/1.2.4",
+    clientVersion: "claw-crony/1.3.0",
     username,
     email,
   };

@@ -25,6 +25,9 @@ describe("zero-config install (issue #7)", () => {
     assert.ok(harness.service, "service should be registered even with empty config");
     assert.ok(harness.methods.has("a2a.send"), "a2a.send method should be registered");
     assert.ok(harness.methods.has("a2a.metrics"), "a2a.metrics method should be registered");
+    assert.ok(harness.methods.has("a2a.match"), "a2a.match method should be registered");
+    assert.ok(harness.methods.has("a2a.history"), "a2a.history method should be registered");
+    assert.ok(harness.methods.has("a2a.peers"), "a2a.peers method should be registered");
   });
 
   it("declares OpenClaw startup activation and tool contracts", () => {

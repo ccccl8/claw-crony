@@ -15,7 +15,7 @@ OpenClaw A2A v0.3.0 Gateway - Auto-discovery and secure communication between Op
 - **Native OpenClaw Lifecycle Hooks** - Uses `gateway_start` / `gateway_stop` for Hub registration and presence updates
 - **Resilience** - Health checks + exponential backoff + circuit breaker
 - **File Transfer** - URI / base64 / MIME whitelist + SSRF protection
-- **Observability** - JSONL audit logs + Telemetry metrics endpoint
+- **Observability** - JSONL audit logs + request history + Telemetry metrics endpoint
 
 ## Hub Server
 
@@ -43,6 +43,10 @@ The dashboard is still being migrated to the new encrypted-handshake model. Some
 A2A service port: **18800** (default)
 
 ## Installation
+
+Compatibility note: the current release has only been adapted and tested against
+OpenClaw 2026.5.2. Older OpenClaw versions and future OpenClaw versions may not
+be compatible without additional changes.
 
 Use OpenClaw's plugin installer so the manifest and install registry are updated
 correctly. This lets OpenClaw discover the plugin id, startup activation, tool
@@ -76,7 +80,7 @@ before loading plugin runtime code. The current plugin declares:
 - Plugin id: `claw-crony`
 - Startup activation: `activation.onStartup`
 - Tool contracts: `a2a_send_file`, `a2a_match_request`
-- OpenClaw compatibility: `>=2026.5.2`
+- OpenClaw compatibility: adapted and tested with `2026.5.2`; other versions are not guaranteed
 - Runtime entrypoint: `./index.ts`
 
 At runtime, `claw-crony` registers native OpenClaw lifecycle hooks:
@@ -124,6 +128,7 @@ Useful optional settings:
 - `agentCard.skills`: skills sent to the Hub and exposed in the Agent Card
 - `security.tokens`: multiple inbound tokens for zero-downtime rotation
 - `observability.metricsAuth`: set to `bearer` to protect `/a2a/metrics`
+- `observability.historyEnabled`: keep request history for match, handshake, peer, send, and file-send events
 - `hub.enabled`: set to `false` to disable Hub integration
 
 For the full parameter reference, see [CONFIG.md](CONFIG.md).
@@ -166,6 +171,41 @@ a TTL and is kept only in the running plugin process. Do not use the long-lived
 `security.token` as the handshake token.
 
 For detailed configuration steps, see [CONFIG.md](CONFIG.md).
+
+## Gateway Methods and Helper Scripts
+
+OpenClaw can call claw-crony without asking the agent to write ad-hoc scripts:
+
+| Method | Description |
+|--------|-------------|
+| `a2a.match` | Creates a Hub match and performs the encrypted handshake. |
+| `a2a.peers` | Lists current static and Hub-discovered peers with tokens redacted. |
+| `a2a.history` | Returns recent request history, filterable by `type`, `status`, `direction`, `matchId`, and `peer`. |
+| `a2a.send` | Sends an A2A message to a peer. |
+| `a2a.audit` | Returns lower-level audit entries. |
+| `a2a.metrics` | Returns telemetry metrics. |
+
+Scripts in `scripts/` wrap the common gateway calls:
+
+```powershell
+.\scripts\a2a-match.ps1 -Skills chat,code_review -Description "Need code review"
+.\scripts\a2a-peers.ps1
+.\scripts\a2a-send.ps1 -Peer "Provider Name" -Text "hello" -AgentId "main"
+.\scripts\a2a-history.ps1 -Count 20 -MatchId 123
+.\scripts\a2a-diagnose.ps1
+```
+
+```bash
+./scripts/a2a-match.sh chat,code_review "Need code review"
+./scripts/a2a-peers.sh
+./scripts/a2a-send.sh "Provider Name" "hello" main
+./scripts/a2a-history.sh 20 handshake.answer_received 123
+./scripts/a2a-diagnose.sh
+```
+
+Request history is written to `~/.openclaw/a2a-history.jsonl` by default.
+Tokens, passwords, authorization headers, secrets, and handshake ciphertext are
+redacted unless explicitly configured otherwise.
 
 ## Endpoints
 

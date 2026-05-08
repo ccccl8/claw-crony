@@ -26,6 +26,7 @@ import { runTaskCleanup } from "./src/task-cleanup.js";
 import { FileTaskStore } from "./src/task-store.js";
 import { GatewayTelemetry } from "./src/telemetry.js";
 import { AuditLogger } from "./src/audit.js";
+import { RequestHistoryStore } from "./src/history.js";
 import { PeerHealthManager } from "./src/peer-health.js";
 import { runHubRegistration } from "./src/hub-registration.js";
 import { HubMatchClient, type HubHandshakeMessage, type HubMatchResult } from "./src/hub-match.js";
@@ -243,6 +244,13 @@ export function parseConfig(raw: unknown, resolvePath?: (nextPath: string) => st
         path.join(os.homedir(), ".openclaw", "a2a-audit.jsonl"),
         resolvePath,
       ),
+      historyEnabled: asBoolean(observability.historyEnabled, true),
+      historyLogPath: resolveConfiguredPath(
+        observability.historyLogPath,
+        path.join(os.homedir(), ".openclaw", "a2a-history.jsonl"),
+        resolvePath,
+      ),
+      historyIncludeEncryptedPayloads: asBoolean(observability.historyIncludeEncryptedPayloads, false),
     },
     timeouts: {
       agentResponseTimeoutMs: asNumber(timeouts.agentResponseTimeoutMs, 300_000),
@@ -358,6 +366,7 @@ async function processPendingHubMatches(
   api: OpenClawPluginApi,
   config: GatewayConfig,
   processedMessages: Set<number>,
+  historyStore?: RequestHistoryStore,
 ) {
   let hubClient: HubMatchClient;
   try {
@@ -394,10 +403,32 @@ async function processPendingHubMatches(
         }
 
         const decrypted = decryptHandshake(message.ciphertext, identity);
+        historyStore?.record({
+          type: message.messageType === "answer" ? "handshake.answer_received" : "handshake.offer_received",
+          status: "started",
+          direction: "inbound",
+          matchId: match.id,
+          messageId: message.id,
+          peer: match.requester?.name ?? `agent-${message.senderAgentId}`,
+          detail: {
+            messageType: message.messageType,
+            senderAgentId: message.senderAgentId,
+            receiverAgentId: message.receiverAgentId,
+          },
+        });
         const tokenValidationError = getHandshakeTokenValidationError(decrypted.token);
         if (tokenValidationError) {
           await hubClient.consumeHandshakeMessage(match.id, message.id);
           processedMessages.add(message.id);
+          historyStore?.record({
+            type: "handshake.failed",
+            status: "ignored",
+            direction: "inbound",
+            matchId: match.id,
+            messageId: message.id,
+            peer: match.requester?.name ?? `agent-${message.senderAgentId}`,
+            detail: { reason: tokenValidationError },
+          });
           api.logger.warn(`claw-crony: ignored malformed handshake ${message.id} for match ${match.id} - ${tokenValidationError}`);
           continue;
         }
@@ -408,6 +439,17 @@ async function processPendingHubMatches(
           ? (match.requester?.name ?? `agent-${decrypted.fromAgentId}`)
           : (match.provider?.name ?? `agent-${decrypted.fromAgentId}`);
         upsertEphemeralPeer(config, remoteName, decrypted.address, decrypted.token);
+        historyStore?.record({
+          type: "peer.upserted",
+          status: "success",
+          direction: "local",
+          matchId: match.id,
+          peer: remoteName,
+          detail: {
+            agentCardUrl: config.peers.find((peer) => peer.name === remoteName)?.agentCardUrl,
+            tokenExpiresAt: decrypted.tokenExpiresAt,
+          },
+        });
 
         if (message.messageType === "offer" && match.callerRole === "provider") {
           const localAddress = getAdvertisedAddress(config);
@@ -441,6 +483,17 @@ async function processPendingHubMatches(
             ciphertext: encryptHandshake(payload, peerPublicKey),
             expiresAt: issued.expiresAt,
           });
+          historyStore?.record({
+            type: "handshake.answer_sent",
+            status: "success",
+            direction: "outbound",
+            matchId: match.id,
+            peer: remoteName,
+            detail: {
+              toAgentId: decrypted.fromAgentId,
+              expiresAt: issued.expiresAt,
+            },
+          });
           await hubClient.markReady(match.id);
           api.logger.info(`claw-crony: answered encrypted handshake for match ${match.id}`);
         } else if (message.messageType === "answer") {
@@ -465,6 +518,10 @@ const plugin = {
       structuredLogs: config.observability.structuredLogs,
     });
     const auditLogger = new AuditLogger(config.observability.auditLogPath);
+    const historyStore = new RequestHistoryStore(config.observability.historyLogPath, {
+      enabled: config.observability.historyEnabled,
+      includeEncryptedPayloads: config.observability.historyIncludeEncryptedPayloads,
+    });
     const client = new A2AClient();
     const taskStore = new FileTaskStore(config.storage.tasksDir);
     const executor = new QueueingAgentExecutor(
@@ -511,6 +568,13 @@ const plugin = {
     // Wire audit logger for inbound task completion
     telemetry.setTaskAuditCallback((taskId, contextId, state, durationMs) => {
       auditLogger.recordInbound(taskId, contextId, state, durationMs);
+      historyStore.record({
+        type: state === "completed" ? "task.inbound_completed" : "task.inbound_failed",
+        status: state === "completed" ? "success" : "failure",
+        direction: "inbound",
+        durationMs,
+        detail: { taskId, contextId, state },
+      });
     });
 
     // SDK expects userBuilder(req) -> Promise<User>
@@ -676,6 +740,260 @@ const plugin = {
       await stopHubLifecycle("gateway_stop");
     }, { priority: 50 });
 
+    type MatchRequestParams = {
+      skills: string[];
+      description?: string;
+    };
+
+    const performMatchRequest = async (input: MatchRequestParams) => {
+      const startedAt = Date.now();
+      let hubClient: HubMatchClient;
+      try {
+        hubClient = await HubMatchClient.create();
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        historyStore.record({
+          type: "match.failed",
+          status: "failure",
+          direction: "outbound",
+          durationMs: Date.now() - startedAt,
+          detail: { reason: msg },
+        });
+        return {
+          ok: false,
+          text: `Not registered with hub: ${msg}`,
+          details: { ok: false, error: msg },
+        };
+      }
+
+      const identity = loadIdentity();
+      if (!identity) {
+        historyStore.record({
+          type: "match.failed",
+          status: "failure",
+          direction: "outbound",
+          durationMs: Date.now() - startedAt,
+          detail: { reason: "identity_missing" },
+        });
+        return {
+          ok: false,
+          text: "No local identity found. Restart the plugin and try again.",
+          details: { ok: false, error: "identity_missing" },
+        };
+      }
+
+      const localAddress = getAdvertisedAddress(config);
+      if (!localAddress) {
+        historyStore.record({
+          type: "match.failed",
+          status: "failure",
+          direction: "outbound",
+          durationMs: Date.now() - startedAt,
+          detail: { reason: "address_missing" },
+        });
+        return {
+          ok: false,
+          text: "No advertised address is configured for this agent.",
+          details: { ok: false, error: "address_missing" },
+        };
+      }
+
+      let match: Awaited<ReturnType<HubMatchClient["createMatch"]>>;
+      try {
+        match = await hubClient.createMatch({
+          skills: input.skills,
+          description: input.description,
+        });
+        historyStore.record({
+          type: "match.created",
+          status: "success",
+          direction: "outbound",
+          matchId: match.id,
+          peer: match.provider?.name,
+          detail: {
+            skills: input.skills,
+            description: input.description,
+            providerAgentId: match.provider?.id,
+          },
+        });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        historyStore.record({
+          type: "match.failed",
+          status: "failure",
+          direction: "outbound",
+          durationMs: Date.now() - startedAt,
+          detail: { reason: msg, skills: input.skills },
+        });
+        return {
+          ok: false,
+          text: `Failed to create match: ${msg}`,
+          details: { ok: false, error: msg },
+        };
+      }
+
+      const provider = match.provider;
+      const providerPublicKey = provider?.publicKey;
+      if (!provider || !providerPublicKey) {
+        historyStore.record({
+          type: "handshake.failed",
+          status: "failure",
+          direction: "outbound",
+          matchId: match.id,
+          peer: provider?.name,
+          detail: { reason: "provider_public_key_missing" },
+        });
+        return {
+          ok: false,
+          text: `Match created (id=${match.id}) but provider public key is missing`,
+          details: { ok: false, matchId: match.id, error: "provider_public_key_missing" },
+        };
+      }
+
+      const issued = issueEphemeralInboundToken(config, match.id, provider.id);
+      const localPayload: HandshakePayload = {
+        version: 1,
+        matchId: match.id,
+        sessionId: crypto.randomUUID(),
+        fromAgentId: hubClient.agentId,
+        toAgentId: provider.id,
+        address: localAddress,
+        agentCardPath: "/.well-known/agent.json",
+        token: issued.token,
+        tokenExpiresAt: issued.expiresAt,
+        protocols: ["jsonrpc", "rest", "grpc"],
+        createdAt: new Date().toISOString(),
+        nonce: crypto.randomBytes(12).toString("hex"),
+      };
+
+      try {
+        await hubClient.sendHandshakeMessage(match.id, {
+          messageType: "offer",
+          ciphertext: encryptHandshake(localPayload, providerPublicKey),
+          expiresAt: issued.expiresAt,
+        });
+        historyStore.record({
+          type: "handshake.offer_sent",
+          status: "success",
+          direction: "outbound",
+          matchId: match.id,
+          peer: provider.name,
+          detail: {
+            toAgentId: provider.id,
+            address: localAddress,
+            expiresAt: issued.expiresAt,
+          },
+        });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        historyStore.record({
+          type: "handshake.failed",
+          status: "failure",
+          direction: "outbound",
+          matchId: match.id,
+          peer: provider.name,
+          durationMs: Date.now() - startedAt,
+          detail: { reason: msg, phase: "offer" },
+        });
+        return {
+          ok: false,
+          text: `Match created (id=${match.id}) but failed to send encrypted handshake offer: ${msg}`,
+          details: { ok: false, matchId: match.id, error: msg },
+        };
+      }
+
+      let answer: HubHandshakeMessage;
+      try {
+        answer = await waitForHandshakeAnswer(hubClient, match.id);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        historyStore.record({
+          type: "handshake.failed",
+          status: "failure",
+          direction: "inbound",
+          matchId: match.id,
+          peer: provider.name,
+          durationMs: Date.now() - startedAt,
+          detail: { reason: msg, phase: "wait_answer" },
+        });
+        return {
+          ok: false,
+          text: `Encrypted handshake offer sent for match ${match.id}, but waiting for answer failed: ${msg}`,
+          details: { ok: false, matchId: match.id, error: msg },
+        };
+      }
+
+      let remotePayload: HandshakePayload;
+      try {
+        remotePayload = decryptHandshake(answer.ciphertext, identity);
+        const tokenValidationError = getHandshakeTokenValidationError(remotePayload.token);
+        if (tokenValidationError) {
+          throw new Error(tokenValidationError);
+        }
+        await hubClient.consumeHandshakeMessage(match.id, answer.id);
+        historyStore.record({
+          type: "handshake.answer_received",
+          status: "success",
+          direction: "inbound",
+          matchId: match.id,
+          messageId: answer.id,
+          peer: provider.name,
+          detail: {
+            fromAgentId: answer.senderAgentId,
+            address: remotePayload.address,
+            tokenExpiresAt: remotePayload.tokenExpiresAt,
+          },
+        });
+        upsertEphemeralPeer(config, provider.name, remotePayload.address, remotePayload.token);
+        historyStore.record({
+          type: "peer.upserted",
+          status: "success",
+          direction: "local",
+          matchId: match.id,
+          peer: provider.name,
+          detail: {
+            agentCardUrl: config.peers.find((peer) => peer.name === provider.name)?.agentCardUrl,
+            tokenExpiresAt: remotePayload.tokenExpiresAt,
+          },
+        });
+        await hubClient.markReady(match.id);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        historyStore.record({
+          type: "handshake.failed",
+          status: "failure",
+          direction: "inbound",
+          matchId: match.id,
+          messageId: answer.id,
+          peer: provider.name,
+          durationMs: Date.now() - startedAt,
+          detail: { reason: msg, phase: "process_answer" },
+        });
+        return {
+          ok: false,
+          text: `Encrypted handshake answer received for match ${match.id}, but processing failed: ${msg}`,
+          details: { ok: false, matchId: match.id, error: msg },
+        };
+      }
+
+      return {
+        ok: true,
+        text: `Encrypted handshake ready: match=${match.id}\n` +
+          `Provider: ${provider.name}\n` +
+          `Address: ${remotePayload.address}\n` +
+          `Temporary token: ${remotePayload.token}\n` +
+          `Token expires at: ${remotePayload.tokenExpiresAt}`,
+        details: {
+          ok: true,
+          matchId: match.id,
+          status: "ready_to_connect",
+          providerAddress: remotePayload.address,
+          peerToken: remotePayload.token,
+          tokenExpiresAt: remotePayload.tokenExpiresAt,
+        },
+      };
+    };
+
     api.registerGatewayMethod("a2a.metrics", ({ respond }) => {
       respond(true, {
         metrics: telemetry.snapshot(),
@@ -688,6 +1006,53 @@ const plugin = {
       auditLogger
         .tail(count)
         .then((entries) => respond(true, { entries, count: entries.length }))
+        .catch((error) => respond(false, { error: String(error?.message || error) }));
+    });
+
+    api.registerGatewayMethod("a2a.history", ({ params, respond }) => {
+      const payload = asObject(params);
+      const matchId = asNumber(payload.matchId, Number.NaN);
+      historyStore
+        .tail({
+          count: Math.min(Math.max(1, asNumber(payload.count ?? payload.limit, 50)), 500),
+          type: asString(payload.type, ""),
+          status: asString(payload.status, ""),
+          direction: asString(payload.direction, ""),
+          matchId: Number.isFinite(matchId) ? matchId : undefined,
+          peer: asString(payload.peer, ""),
+        })
+        .then((entries) => respond(true, { entries, count: entries.length }))
+        .catch((error) => respond(false, { error: String(error?.message || error) }));
+    });
+
+    api.registerGatewayMethod("a2a.peers", ({ respond }) => {
+      const peerStates = healthManager?.getAllStates() ?? new Map();
+      respond(true, {
+        peers: config.peers.map((peer) => ({
+          name: peer.name,
+          agentCardUrl: peer.agentCardUrl,
+          authType: peer.auth?.type,
+          hasToken: Boolean(peer.auth?.token),
+          health: peerStates.get(peer.name) ?? null,
+        })),
+      });
+    });
+
+    api.registerGatewayMethod("a2a.match", ({ params, respond }) => {
+      const payload = asObject(params);
+      const skills = Array.isArray(payload.skills)
+        ? payload.skills.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
+        : [];
+      if (skills.length === 0) {
+        respond(false, { error: "skills must be a non-empty string array" });
+        return;
+      }
+
+      performMatchRequest({
+        skills,
+        description: asString(payload.description, ""),
+      })
+        .then((result) => respond(result.ok, result.details))
         .catch((error) => respond(false, { error: String(error?.message || error) }));
     });
 
@@ -728,6 +1093,16 @@ const plugin = {
       }
 
       const startedAt = Date.now();
+      historyStore.record({
+        type: "send.started",
+        status: "started",
+        direction: "outbound",
+        peer: peer.name,
+        detail: {
+          resolvedAgentId: (message as any).agentId,
+          hasParts: Array.isArray((message as any).parts),
+        },
+      });
       const sendOptions = {
         healthManager: healthManager ?? undefined,
         retryConfig: config.resilience.retry,
@@ -744,6 +1119,17 @@ const plugin = {
           const outDuration = Date.now() - startedAt;
           telemetry.recordOutboundRequest(peer.name, result.ok, result.statusCode, outDuration);
           auditLogger.recordOutbound(peer.name, result.ok, result.statusCode, outDuration);
+          historyStore.record({
+            type: result.ok ? "send.completed" : "send.failed",
+            status: result.ok ? "success" : "failure",
+            direction: "outbound",
+            peer: peer.name,
+            durationMs: outDuration,
+            detail: {
+              statusCode: result.statusCode,
+              response: result.ok ? undefined : result.response,
+            },
+          });
           if (result.ok) {
             respond(true, {
               statusCode: result.statusCode,
@@ -761,6 +1147,14 @@ const plugin = {
           const errDuration = Date.now() - startedAt;
           telemetry.recordOutboundRequest(peer.name, false, 500, errDuration);
           auditLogger.recordOutbound(peer.name, false, 500, errDuration);
+          historyStore.record({
+            type: "send.failed",
+            status: "failure",
+            direction: "outbound",
+            peer: peer.name,
+            durationMs: errDuration,
+            detail: { error: String(error?.message || error) },
+          });
           respond(false, { error: String(error?.message || error) });
         });
     });
@@ -790,11 +1184,6 @@ const plugin = {
         text?: string;
         agentId?: string;
       };
-      type MatchRequestToolParams = {
-        skills: string[];
-        description?: string;
-      };
-
       api.registerTool({
         name: "a2a_send_file",
         description: "Send a file to a peer agent via A2A. The file is referenced by its public URL (URI). " +
@@ -846,9 +1235,35 @@ const plugin = {
             if (input.agentId) {
               message.agentId = input.agentId;
             }
+            const startedAt = Date.now();
+            historyStore.record({
+              type: "send_file.started",
+              status: "started",
+              direction: "outbound",
+              peer: peer.name,
+              detail: {
+                uri: input.uri,
+                name: input.name,
+                mimeType: input.mimeType,
+                agentId: input.agentId,
+              },
+            });
             const result = await client.sendMessage(peer, message, {
               healthManager: healthManager ?? undefined,
               retryConfig: config.resilience.retry,
+            });
+            historyStore.record({
+              type: result.ok ? "send_file.completed" : "send_file.failed",
+              status: result.ok ? "success" : "failure",
+              direction: "outbound",
+              peer: peer.name,
+              durationMs: Date.now() - startedAt,
+              detail: {
+                uri: input.uri,
+                name: input.name,
+                mimeType: input.mimeType,
+                response: result.ok ? undefined : result.response,
+              },
             });
             if (result.ok) {
               return {
@@ -862,6 +1277,18 @@ const plugin = {
             };
           } catch (err: unknown) {
             const msg = err instanceof Error ? err.message : String(err);
+            historyStore.record({
+              type: "send_file.failed",
+              status: "failure",
+              direction: "outbound",
+              peer: peer.name,
+              detail: {
+                uri: input.uri,
+                name: input.name,
+                mimeType: input.mimeType,
+                error: msg,
+              },
+            });
             return {
               content: [{ type: "text" as const, text: `Error sending file to ${input.peer}: ${msg}` }],
               details: { ok: false, error: msg },
@@ -897,133 +1324,11 @@ const plugin = {
           },
         },
         async execute(toolCallId, params) {
-          const input = params as MatchRequestToolParams;
-          let hubClient: HubMatchClient;
-          try {
-            hubClient = await HubMatchClient.create();
-          } catch (err) {
-            const msg = err instanceof Error ? err.message : String(err);
-            return {
-              content: [{ type: "text" as const, text: `Not registered with hub: ${msg}` }],
-              details: { ok: false, error: msg },
-            };
-          }
-
-          const identity = loadIdentity();
-          if (!identity) {
-            return {
-              content: [{ type: "text" as const, text: "No local identity found. Restart the plugin and try again." }],
-              details: { ok: false, error: "identity_missing" },
-            };
-          }
-
-          const localAddress = getAdvertisedAddress(config);
-          if (!localAddress) {
-            return {
-              content: [{ type: "text" as const, text: "No advertised address is configured for this agent." }],
-              details: { ok: false, error: "address_missing" },
-            };
-          }
-
-          let match: Awaited<ReturnType<HubMatchClient["createMatch"]>>;
-          try {
-            match = await hubClient.createMatch({
-              skills: input.skills,
-              description: input.description,
-            });
-          } catch (err) {
-            const msg = err instanceof Error ? err.message : String(err);
-            return {
-              content: [{ type: "text" as const, text: `Failed to create match: ${msg}` }],
-              details: { ok: false, error: msg },
-            };
-          }
-
-          const provider = match.provider;
-          const providerPublicKey = provider?.publicKey;
-          if (!provider || !providerPublicKey) {
-            return {
-              content: [{ type: "text" as const, text: `Match created (id=${match.id}) but provider public key is missing` }],
-              details: { ok: false, matchId: match.id, error: "provider_public_key_missing" },
-            };
-          }
-
-          const issued = issueEphemeralInboundToken(config, match.id, provider.id);
-          const localPayload: HandshakePayload = {
-            version: 1,
-            matchId: match.id,
-            sessionId: crypto.randomUUID(),
-            fromAgentId: hubClient.agentId,
-            toAgentId: provider.id,
-            address: localAddress,
-            agentCardPath: "/.well-known/agent.json",
-            token: issued.token,
-            tokenExpiresAt: issued.expiresAt,
-            protocols: ["jsonrpc", "rest", "grpc"],
-            createdAt: new Date().toISOString(),
-            nonce: crypto.randomBytes(12).toString("hex"),
-          };
-
-          try {
-            await hubClient.sendHandshakeMessage(match.id, {
-              messageType: "offer",
-              ciphertext: encryptHandshake(localPayload, providerPublicKey),
-              expiresAt: issued.expiresAt,
-            });
-          } catch (err) {
-            const msg = err instanceof Error ? err.message : String(err);
-            return {
-              content: [{ type: "text" as const, text: `Match created (id=${match.id}) but failed to send encrypted handshake offer: ${msg}` }],
-              details: { ok: false, matchId: match.id, error: msg },
-            };
-          }
-
-          let answer: HubHandshakeMessage;
-          try {
-            answer = await waitForHandshakeAnswer(hubClient, match.id);
-          } catch (err) {
-            const msg = err instanceof Error ? err.message : String(err);
-            return {
-              content: [{ type: "text" as const, text: `Encrypted handshake offer sent for match ${match.id}, but waiting for answer failed: ${msg}` }],
-              details: { ok: false, matchId: match.id, error: msg },
-            };
-          }
-
-          let remotePayload: HandshakePayload;
-          try {
-            remotePayload = decryptHandshake(answer.ciphertext, identity);
-            const tokenValidationError = getHandshakeTokenValidationError(remotePayload.token);
-            if (tokenValidationError) {
-              throw new Error(tokenValidationError);
-            }
-            await hubClient.consumeHandshakeMessage(match.id, answer.id);
-            upsertEphemeralPeer(config, provider.name, remotePayload.address, remotePayload.token);
-            await hubClient.markReady(match.id);
-          } catch (err) {
-            const msg = err instanceof Error ? err.message : String(err);
-            return {
-              content: [{ type: "text" as const, text: `Encrypted handshake answer received for match ${match.id}, but processing failed: ${msg}` }],
-              details: { ok: false, matchId: match.id, error: msg },
-            };
-          }
-
+          const input = params as MatchRequestParams;
+          const result = await performMatchRequest(input);
           return {
-            content: [{
-              type: "text" as const,
-              text: `Encrypted handshake ready: match=${match.id}\n` +
-                `Provider: ${provider.name}\n` +
-                `Address: ${remotePayload.address}\n` +
-                `Temporary token: ${remotePayload.token}\n` +
-                `Token expires at: ${remotePayload.tokenExpiresAt}`,
-            }],
-            details: {
-              ok: true,
-              matchId: match.id,
-              status: "ready_to_connect",
-              providerAddress: remotePayload.address,
-              peerToken: remotePayload.token,
-              tokenExpiresAt: remotePayload.tokenExpiresAt,
-            },
+            content: [{ type: "text" as const, text: result.text }],
+            details: result.details,
           };
         },
       });
@@ -1132,7 +1437,7 @@ const plugin = {
         if (config.hub?.enabled !== false) {
           const pollingIntervalMs = Math.max(5_000, config.resilience.healthCheck.intervalMs);
           const pollHubMatches = () => {
-            void processPendingHubMatches(api, config, processedHubMessages);
+            void processPendingHubMatches(api, config, processedHubMessages, historyStore);
           };
 
           pollHubMatches();
@@ -1148,6 +1453,7 @@ const plugin = {
         // Stop peer health checks
         healthManager?.stop();
         auditLogger.close();
+        historyStore.close();
 
         await stopHubLifecycle("service");
 
