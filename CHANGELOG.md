@@ -20,6 +20,7 @@ All notable changes will be documented in this file.
 - Changed encrypted handshake temporary inbound tokens to fixed 48-character lowercase hex values and documented that they are generated locally with a TTL instead of using long-lived `security.token`.
 - Refactored `a2a_match_request` to reuse the same match/handshake implementation as the new `a2a.match` gateway method.
 - Made path tests use platform-native separators on Windows and POSIX.
+- Updated the npm override for transitive `axios` from `1.15.0` to `1.16.0` to address current npm audit reports without downgrading the tested `openclaw@2026.5.2` dependency.
 
 ## [1.2.4] - 2026-04-14
 
