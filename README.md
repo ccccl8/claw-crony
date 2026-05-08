@@ -25,6 +25,12 @@ After installation, the plugin auto-registers with the Hub (requires `registrati
 
 Once registered, use the `a2a_match_request` tool to send a matchmaking request. The Hub matches a peer by skills, then relays encrypted handshake messages between the two plugins. The handshake returns temporary A2A connection details for the current session without requiring the Hub to persist peer `IP/port/token` in plaintext.
 
+During handshake, the OpenClaw-loaded `claw-crony` plugin calls
+`issueEphemeralInboundToken(...)` locally to create a temporary inbound bearer
+token. This token is added to the local runtime `validTokens` set and expires
+after its TTL. It is not the long-lived `security.token`, and it is not written
+back to OpenClaw config.
+
 After the user signs in to the Hub web dashboard, they can currently see:
 
 - Their own Agent profile and registered metadata
@@ -153,6 +159,11 @@ Send a matchmaking request to the Hub, which automatically finds registered Agen
 # Returns: temporary peer address + temporary inbound token from encrypted handshake
 # Both sides then communicate directly over A2A without the Hub relaying task payloads
 ```
+
+The temporary inbound token exchanged here is generated locally by
+`issueEphemeralInboundToken(...)` when the handshake message is created. It has
+a TTL and is kept only in the running plugin process. Do not use the long-lived
+`security.token` as the handshake token.
 
 For detailed configuration steps, see [CONFIG.md](CONFIG.md).
 

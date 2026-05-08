@@ -33,7 +33,7 @@ import { normalizeAgentCardSkills } from "./src/skill-catalog.js";
 import { parseRoutingRules, matchRule } from "./src/routing-rules.js";
 import { isRetryableTransportError } from "./src/transport-fallback.js";
 import { decryptHandshake, encryptHandshake } from "./src/handshake-crypto.js";
-import { issueEphemeralInboundToken } from "./src/ephemeral-token.js";
+import { isValidEphemeralInboundToken, issueEphemeralInboundToken } from "./src/ephemeral-token.js";
 import { loadIdentity } from "./src/identity-store.js";
 import type { RoutingRule } from "./src/types.js";
 import type {
@@ -343,6 +343,17 @@ async function waitForHandshakeAnswer(
   throw new Error(`Timed out waiting for handshake answer for match ${matchId}`);
 }
 
+function getHandshakeTokenValidationError(token: unknown): string | null {
+  if (isValidEphemeralInboundToken(token)) {
+    return null;
+  }
+
+  const tokenShape = typeof token === "string"
+    ? `length ${Array.from(token).length}${token.includes("\u2026") ? ", contains U+2026" : ""}`
+    : `type ${typeof token}`;
+  return `invalid ephemeral handshake token: expected 48 lowercase hex characters, got ${tokenShape}`;
+}
+
 async function processPendingHubMatches(
   api: OpenClawPluginApi,
   config: GatewayConfig,
@@ -383,6 +394,13 @@ async function processPendingHubMatches(
         }
 
         const decrypted = decryptHandshake(message.ciphertext, identity);
+        const tokenValidationError = getHandshakeTokenValidationError(decrypted.token);
+        if (tokenValidationError) {
+          await hubClient.consumeHandshakeMessage(match.id, message.id);
+          processedMessages.add(message.id);
+          api.logger.warn(`claw-crony: ignored malformed handshake ${message.id} for match ${match.id} - ${tokenValidationError}`);
+          continue;
+        }
         await hubClient.consumeHandshakeMessage(match.id, message.id);
         processedMessages.add(message.id);
 
@@ -974,6 +992,10 @@ const plugin = {
           let remotePayload: HandshakePayload;
           try {
             remotePayload = decryptHandshake(answer.ciphertext, identity);
+            const tokenValidationError = getHandshakeTokenValidationError(remotePayload.token);
+            if (tokenValidationError) {
+              throw new Error(tokenValidationError);
+            }
             await hubClient.consumeHandshakeMessage(match.id, answer.id);
             upsertEphemeralPeer(config, provider.name, remotePayload.address, remotePayload.token);
             await hubClient.markReady(match.id);
