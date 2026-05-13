@@ -11,6 +11,10 @@ export type RequestHistoryType =
   | "handshake.answer_received"
   | "handshake.failed"
   | "peer.upserted"
+  | "profile.synced"
+  | "profile.sync_failed"
+  | "profile.updated"
+  | "profile.update_failed"
   | "send.started"
   | "send.completed"
   | "send.failed"
@@ -49,7 +53,7 @@ export interface RequestHistoryOptions {
   includeEncryptedPayloads: boolean;
 }
 
-const SECRET_KEY_NAMES = ["token", "secret", "password", "authorization", "ciphertext"];
+const SECRET_KEY_NAMES = ["token", "secret", "password", "authorization", "ciphertext", "privatekey", "private_key"];
 
 function redactValue(key: string, value: unknown, includeEncryptedPayloads: boolean): unknown {
   const normalizedKey = key.toLowerCase();

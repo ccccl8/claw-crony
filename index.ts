@@ -30,6 +30,7 @@ import { RequestHistoryStore } from "./src/history.js";
 import { PeerHealthManager } from "./src/peer-health.js";
 import { runHubRegistration } from "./src/hub-registration.js";
 import { HubMatchClient, type HubHandshakeMessage, type HubMatchResult } from "./src/hub-match.js";
+import { HubProfileClient, syncHubProfile, type HubProfileUpdate } from "./src/hub-profile.js";
 import { normalizeAgentCardSkills } from "./src/skill-catalog.js";
 import { parseRoutingRules, matchRule } from "./src/routing-rules.js";
 import { isRetryableTransportError } from "./src/transport-fallback.js";
@@ -177,6 +178,7 @@ export function parseConfig(raw: unknown, resolvePath?: (nextPath: string) => st
   const circuitBreaker = asObject(resilience.circuitBreaker);
   const hub = asObject(config.hub);
   const registration = asObject(config.registration);
+  const profile = asObject(config.profile);
 
   const inboundAuth = asString(security.inboundAuth, "none") as InboundAuth;
 
@@ -281,6 +283,15 @@ export function parseConfig(raw: unknown, resolvePath?: (nextPath: string) => st
       email: asString(registration.email, ""),
       password: asString(registration.password, ""),
       clientId: asString(registration.clientId, ""),
+    },
+    profile: {
+      plazaEnabled: asBoolean(profile.plazaEnabled, true),
+      autoSyncOnStartup: asBoolean(profile.autoSyncOnStartup, true),
+      displayName: asString(profile.displayName, ""),
+      headline: asString(profile.headline, ""),
+      bio: asString(profile.bio, ""),
+      plazaMessage: asString(profile.plazaMessage, ""),
+      contactHint: asString(profile.contactHint, ""),
     },
   };
 }
@@ -706,6 +717,32 @@ const plugin = {
           } catch (presenceErr) {
             api.logger.warn(`claw-crony: failed to update hub presence - ${presenceErr instanceof Error ? presenceErr.message : String(presenceErr)}`);
           }
+
+          if (config.profile.autoSyncOnStartup) {
+            try {
+              const profile = await syncHubProfile(config);
+              api.logger.info(`claw-crony: synced hub plaza profile (agentId=${profile.agentId}, source=${source})`);
+              historyStore.record({
+                type: "profile.synced",
+                status: "success",
+                direction: "outbound",
+                detail: {
+                  agentId: profile.agentId,
+                  displayName: profile.displayName,
+                  plazaEnabled: profile.plazaEnabled,
+                },
+              });
+            } catch (profileErr) {
+              const msg = profileErr instanceof Error ? profileErr.message : String(profileErr);
+              api.logger.warn(`claw-crony: failed to sync hub plaza profile - ${msg}`);
+              historyStore.record({
+                type: "profile.sync_failed",
+                status: "failure",
+                direction: "outbound",
+                detail: { reason: msg },
+              });
+            }
+          }
         })();
       }
 
@@ -1038,6 +1075,90 @@ const plugin = {
       });
     });
 
+    api.registerGatewayMethod("a2a.plaza.list", ({ params, respond }) => {
+      const payload = asObject(params);
+      let profileClient: HubProfileClient;
+      try {
+        profileClient = HubProfileClient.createFromRegistration();
+      } catch (err) {
+        respond(false, { error: err instanceof Error ? err.message : String(err) });
+        return;
+      }
+
+      profileClient
+        .listPlazaAgents({
+          skill: asString(payload.skill, ""),
+          q: asString(payload.q ?? payload.query, ""),
+        })
+        .then((agents) => respond(true, { agents, count: agents.length }))
+        .catch((error) => respond(false, { error: String(error?.message || error) }));
+    });
+
+    api.registerGatewayMethod("a2a.profile.get", ({ params, respond }) => {
+      const payload = asObject(params);
+      const agentId = asNumber(payload.agentId, Number.NaN);
+      let profileClient: HubProfileClient;
+      try {
+        profileClient = HubProfileClient.createFromRegistration();
+      } catch (err) {
+        respond(false, { error: err instanceof Error ? err.message : String(err) });
+        return;
+      }
+
+      if (!Number.isFinite(agentId)) {
+        respond(false, { error: "agentId is required" });
+        return;
+      }
+
+      profileClient
+        .getProfile(agentId)
+        .then((profile) => respond(true, { profile }))
+        .catch((error) => respond(false, { error: String(error?.message || error) }));
+    });
+
+    api.registerGatewayMethod("a2a.profile.update", ({ params, respond }) => {
+      const payload = asObject(params);
+      const override: HubProfileUpdate = {
+        name: asString(payload.name, "") || undefined,
+        description: asString(payload.description, "") || undefined,
+        displayName: asString(payload.displayName, "") || undefined,
+        headline: asString(payload.headline, "") || undefined,
+        bio: asString(payload.bio, "") || undefined,
+        plazaMessage: asString(payload.plazaMessage, "") || undefined,
+        contactHint: asString(payload.contactHint, "") || undefined,
+      };
+      if (typeof payload.plazaEnabled === "boolean") {
+        override.plazaEnabled = payload.plazaEnabled;
+      }
+      if (Array.isArray(payload.skills)) {
+        override.skills = payload.skills.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0);
+      }
+
+      syncHubProfile(config, override)
+        .then((profile) => {
+          historyStore.record({
+            type: "profile.updated",
+            status: "success",
+            direction: "outbound",
+            detail: {
+              agentId: profile.agentId,
+              displayName: profile.displayName,
+              plazaEnabled: profile.plazaEnabled,
+            },
+          });
+          respond(true, { profile });
+        })
+        .catch((error) => {
+          historyStore.record({
+            type: "profile.update_failed",
+            status: "failure",
+            direction: "outbound",
+            detail: { reason: String(error?.message || error) },
+          });
+          respond(false, { error: String(error?.message || error) });
+        });
+    });
+
     api.registerGatewayMethod("a2a.match", ({ params, respond }) => {
       const payload = asObject(params);
       const skills = Array.isArray(payload.skills)
@@ -1330,6 +1451,106 @@ const plugin = {
             content: [{ type: "text" as const, text: result.text }],
             details: result.details,
           };
+        },
+      });
+
+      api.registerTool({
+        name: "a2a_plaza_search",
+        description: "Search the OpenClaw Hub public agent plaza by keyword or skill. " +
+          "Use this to discover available agents before requesting a match.",
+        label: "A2A Plaza Search",
+        parameters: {
+          type: "object" as const,
+          properties: {
+            q: {
+              type: "string" as const,
+              description: "Optional keyword to search agent names, descriptions, bios, or plaza messages",
+            },
+            skill: {
+              type: "string" as const,
+              description: "Optional skill filter such as chat, code_review, data_analysis",
+            },
+          },
+        },
+        async execute(toolCallId, params) {
+          const input = asObject(params);
+          try {
+            const profileClient = HubProfileClient.createFromRegistration();
+            const agents = await profileClient.listPlazaAgents({
+              q: asString(input.q, ""),
+              skill: asString(input.skill, ""),
+            });
+            const preview = agents.slice(0, 10).map((agent) => {
+              const skills = (agent.displaySkills?.length ? agent.displaySkills : agent.skills).join(", ");
+              return `- ${agent.displayName || agent.name} (agentId=${agent.agentId}, ${agent.presenceStatus || "unknown"}) skills=[${skills}]`;
+            }).join("\n");
+            return {
+              content: [{ type: "text" as const, text: preview || "No public agents found." }],
+              details: { ok: true, count: agents.length, agents },
+            };
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            return {
+              content: [{ type: "text" as const, text: `Failed to search Hub plaza: ${msg}` }],
+              details: { ok: false, error: msg },
+            };
+          }
+        },
+      });
+
+      api.registerTool({
+        name: "a2a_update_profile",
+        description: "Update this agent's public Hub plaza profile. " +
+          "This syncs local identity details and optional public display fields to the Hub.",
+        label: "A2A Update Profile",
+        parameters: {
+          type: "object" as const,
+          properties: {
+            displayName: { type: "string" as const, description: "Optional public display name" },
+            headline: { type: "string" as const, description: "Short public headline" },
+            bio: { type: "string" as const, description: "Public profile bio" },
+            plazaMessage: { type: "string" as const, description: "Current public plaza message or availability note" },
+            contactHint: { type: "string" as const, description: "Optional public contact hint" },
+            plazaEnabled: { type: "boolean" as const, description: "Whether to show this agent in the public plaza" },
+            skills: {
+              type: "array" as const,
+              items: { type: "string" as const },
+              description: "Optional replacement skill list for the public agent profile",
+            },
+          },
+        },
+        async execute(toolCallId, params) {
+          const input = asObject(params);
+          const override: HubProfileUpdate = {
+            displayName: asString(input.displayName, "") || undefined,
+            headline: asString(input.headline, "") || undefined,
+            bio: asString(input.bio, "") || undefined,
+            plazaMessage: asString(input.plazaMessage, "") || undefined,
+            contactHint: asString(input.contactHint, "") || undefined,
+          };
+          if (typeof input.plazaEnabled === "boolean") {
+            override.plazaEnabled = input.plazaEnabled;
+          }
+          if (Array.isArray(input.skills)) {
+            override.skills = input.skills.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0);
+          }
+
+          try {
+            const profile = await syncHubProfile(config, override);
+            return {
+              content: [{
+                type: "text" as const,
+                text: `Hub plaza profile updated for ${profile.displayName || profile.name} (agentId=${profile.agentId}).`,
+              }],
+              details: { ok: true, profile },
+            };
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            return {
+              content: [{ type: "text" as const, text: `Failed to update Hub plaza profile: ${msg}` }],
+              details: { ok: false, error: msg },
+            };
+          }
         },
       });
     }

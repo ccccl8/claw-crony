@@ -112,6 +112,7 @@ export interface GatewayConfig {
   resilience: PeerResilienceConfig;
   hub?: HubConfig;
   registration?: RegistrationConfig;
+  profile: ProfileConfig;
 }
 
 // ---------------------------------------------------------------------------
@@ -132,6 +133,16 @@ export interface RegistrationConfig {
   clientId?: string;
 }
 
+export interface ProfileConfig {
+  plazaEnabled: boolean;
+  autoSyncOnStartup: boolean;
+  displayName?: string;
+  headline?: string;
+  bio?: string;
+  plazaMessage?: string;
+  contactHint?: string;
+}
+
 // ---------------------------------------------------------------------------
 // Hub registration data (persisted to ~/.openclaw/a2a-registration.json)
 // ---------------------------------------------------------------------------
@@ -143,6 +154,9 @@ export interface HubRegistrationData {
   clientId: string;
   publicKey: string;
   keyVersion: number;
+  signingPublicKey?: string;
+  signingKeyVersion?: number;
+  signingAlgorithm?: "ed25519";
   registeredAt: string;
   name: string;
   description: string;
@@ -155,6 +169,10 @@ export interface IdentityData {
   publicKey: string;
   privateKey: string;
   keyVersion: number;
+  signingPublicKey?: string;
+  signingPrivateKey?: string;
+  signingKeyVersion?: number;
+  signingAlgorithm?: "ed25519";
   createdAt: string;
 }
 

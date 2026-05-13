@@ -4,6 +4,20 @@ All notable changes will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- Added Hub plaza/profile integration for publishing this Agent to the public Hub plaza.
+- Added `profile` configuration for public plaza visibility, startup auto-sync, display name, headline, bio, plaza message, and contact hint.
+- Added gateway methods `a2a.plaza.list`, `a2a.profile.get`, and `a2a.profile.update`.
+- Added agent tools `a2a_plaza_search` and `a2a_update_profile`.
+- Added startup profile sync after Hub registration and presence update.
+- Added local Ed25519 signing identity generation for Hub passwordless authentication.
+
+### Changed
+- Updated OpenClaw tool contracts to include Hub plaza search and profile update tools.
+- Hub registration now publishes the local Ed25519 signing public key, and cached registrations are refreshed when the Hub does not have the current signing key.
+- Hub profile updates now use Hub challenge/verify authentication and send `Authorization: Bearer ...` instead of relying on the previous `client_id + public_key` profile update check.
+- Extended request history event types with Hub profile sync/update events.
+
 ## [1.3.0] - 2026-05-08
 
 ### Added

@@ -19,6 +19,20 @@ function randomClientId(): string {
   return crypto.randomUUID();
 }
 
+function createSigningKeyFields(): Pick<IdentityData, "signingPublicKey" | "signingPrivateKey" | "signingKeyVersion" | "signingAlgorithm"> {
+  const { publicKey, privateKey } = crypto.generateKeyPairSync("ed25519");
+  return {
+    signingPublicKey: publicKey.export({ format: "der", type: "spki" }).toString("base64url"),
+    signingPrivateKey: privateKey.export({ format: "pem", type: "pkcs8" }).toString(),
+    signingKeyVersion: 1,
+    signingAlgorithm: "ed25519",
+  };
+}
+
+function hasSigningIdentity(identity: IdentityData): boolean {
+  return Boolean(identity.signingPublicKey && identity.signingPrivateKey);
+}
+
 export function loadIdentity(configDir?: string): IdentityData | null {
   const identityPath = getIdentityPath(configDir ?? getConfigDir());
   try {
@@ -44,8 +58,25 @@ export function loadOrCreateIdentity(clientId?: string): IdentityData {
 
   const existing = loadIdentity(configDir);
   if (existing) {
+    let changed = false;
     if (clientId && existing.clientId !== clientId) {
       existing.clientId = clientId;
+      changed = true;
+    }
+    if (!hasSigningIdentity(existing)) {
+      Object.assign(existing, createSigningKeyFields());
+      changed = true;
+    } else {
+      if (!existing.signingKeyVersion || existing.signingKeyVersion < 1) {
+        existing.signingKeyVersion = 1;
+        changed = true;
+      }
+      if (!existing.signingAlgorithm) {
+        existing.signingAlgorithm = "ed25519";
+        changed = true;
+      }
+    }
+    if (changed) {
       saveIdentity(configDir, existing);
     }
     return existing;
@@ -58,6 +89,7 @@ export function loadOrCreateIdentity(clientId?: string): IdentityData {
     publicKey: publicKey.export({ format: "pem", type: "spki" }).toString(),
     privateKey: privateKey.export({ format: "pem", type: "pkcs8" }).toString(),
     keyVersion: 1,
+    ...createSigningKeyFields(),
     createdAt: new Date().toISOString(),
   };
   saveIdentity(configDir, identity);

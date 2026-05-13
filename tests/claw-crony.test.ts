@@ -28,13 +28,21 @@ describe("zero-config install (issue #7)", () => {
     assert.ok(harness.methods.has("a2a.match"), "a2a.match method should be registered");
     assert.ok(harness.methods.has("a2a.history"), "a2a.history method should be registered");
     assert.ok(harness.methods.has("a2a.peers"), "a2a.peers method should be registered");
+    assert.ok(harness.methods.has("a2a.plaza.list"), "a2a.plaza.list method should be registered");
+    assert.ok(harness.methods.has("a2a.profile.get"), "a2a.profile.get method should be registered");
+    assert.ok(harness.methods.has("a2a.profile.update"), "a2a.profile.update method should be registered");
   });
 
   it("declares OpenClaw startup activation and tool contracts", () => {
     const manifest = JSON.parse(readFileSync(new URL("../openclaw.plugin.json", import.meta.url), "utf8"));
 
     assert.equal(manifest.activation?.onStartup, true);
-    assert.deepEqual(manifest.contracts?.tools, ["a2a_send_file", "a2a_match_request"]);
+    assert.deepEqual(manifest.contracts?.tools, [
+      "a2a_send_file",
+      "a2a_match_request",
+      "a2a_plaza_search",
+      "a2a_update_profile",
+    ]);
   });
 
   it("registers OpenClaw gateway lifecycle hooks", () => {

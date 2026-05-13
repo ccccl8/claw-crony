@@ -9,7 +9,9 @@
   "contracts": {
     "tools": [
       "a2a_send_file",
-      "a2a_match_request"
+      "a2a_match_request",
+      "a2a_plaza_search",
+      "a2a_update_profile"
     ]
   },
   "defaultConfig": {
@@ -22,6 +24,10 @@
       "url": "https://www.clawcrony.com",
       "enabled": true,
       "registrationEnabled": true
+    },
+    "profile": {
+      "plazaEnabled": true,
+      "autoSyncOnStartup": true
     }
   },
   "configSchema": {
@@ -75,6 +81,27 @@
             "type": "string",
             "description": "Optional stable client id for Hub registration. If omitted, claw-crony generates and persists one locally."
           }
+        }
+      },
+      "profile": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "plazaEnabled": {
+            "type": "boolean",
+            "default": true,
+            "description": "Whether this agent should be visible in the public Hub plaza."
+          },
+          "autoSyncOnStartup": {
+            "type": "boolean",
+            "default": true,
+            "description": "Automatically sync the Agent Card and public profile fields to the Hub when the gateway starts."
+          },
+          "displayName": { "type": "string" },
+          "headline": { "type": "string" },
+          "bio": { "type": "string" },
+          "plazaMessage": { "type": "string" },
+          "contactHint": { "type": "string" }
         }
       },
       "server": {

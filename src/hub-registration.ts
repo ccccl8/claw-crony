@@ -1,8 +1,8 @@
 /**
  * Hub registration module for claw-crony.
  *
- * Registers the local plugin with the hub using client_id + public_key
- * and persists the resulting agent binding locally.
+ * Registers the local plugin with the hub using client_id, X25519 public key,
+ * and Ed25519 signing public key, then persists the resulting agent binding.
  */
 
 import fs from "node:fs";
@@ -53,6 +53,10 @@ interface HubAgentDto {
   status: string;
   clientId?: string;
   publicKey?: string;
+  signingPublicKey?: string;
+  signingKeyVersion?: number;
+  signingAlgorithm?: string;
+  signingKeyStatus?: string;
   username?: string;
   email?: string;
 }
@@ -64,6 +68,9 @@ interface CreateAgentPayload {
   clientId: string;
   publicKey: string;
   keyVersion: number;
+  signingPublicKey?: string;
+  signingKeyVersion?: number;
+  signingAlgorithm?: "ed25519";
   clientVersion?: string;
   username?: string;
   email?: string;
@@ -145,6 +152,15 @@ function flattenSkills(skills: Array<{ id?: string; name: string; description?: 
   return skills.map((s) => (typeof s === "string" ? s : s.name));
 }
 
+function hasMatchingSigningKey(agent: HubAgentDto, signingPublicKey?: string): boolean {
+  return Boolean(
+    signingPublicKey &&
+    agent.signingPublicKey === signingPublicKey &&
+    (!agent.signingAlgorithm || agent.signingAlgorithm === "ed25519") &&
+    (!agent.signingKeyStatus || agent.signingKeyStatus === "active"),
+  );
+}
+
 export interface HubRegistration {
   agentId: number;
   token: string;
@@ -171,11 +187,12 @@ export async function runHubRegistration(
     existing &&
     existing.hubUrl === hubUrl &&
     existing.clientId === identity.clientId &&
-    existing.publicKey === identity.publicKey
+    existing.publicKey === identity.publicKey &&
+    existing.signingPublicKey === identity.signingPublicKey
   ) {
     try {
       const agent = await lookupAgentByClientId(hubUrl, identity.clientId);
-      if (agent && agent.id === existing.agentId) {
+      if (agent && agent.id === existing.agentId && hasMatchingSigningKey(agent, identity.signingPublicKey)) {
         api.logger.info(`claw-crony: using existing hub registration (agentId=${existing.agentId})`);
         return {
           agentId: existing.agentId,
@@ -202,6 +219,9 @@ export async function runHubRegistration(
     clientId: identity.clientId,
     publicKey: identity.publicKey,
     keyVersion: identity.keyVersion,
+    signingPublicKey: identity.signingPublicKey,
+    signingKeyVersion: identity.signingKeyVersion ?? 1,
+    signingAlgorithm: "ed25519",
     clientVersion: "claw-crony/1.3.0",
     username,
     email,
@@ -258,12 +278,15 @@ export async function runHubRegistration(
   }
 
   const registrationData: HubRegistrationData = {
-    version: 2,
+    version: 3,
     hubUrl,
     agentId,
     clientId: identity.clientId,
     publicKey: identity.publicKey,
     keyVersion: identity.keyVersion,
+    signingPublicKey: identity.signingPublicKey,
+    signingKeyVersion: identity.signingKeyVersion ?? 1,
+    signingAlgorithm: "ed25519",
     registeredAt: new Date().toISOString(),
     name,
     description,
