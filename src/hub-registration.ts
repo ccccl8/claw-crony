@@ -10,12 +10,16 @@ import os from "node:os";
 import path from "node:path";
 
 import type {
+  ConnectionDescriptor,
+  ConnectionEndpoint,
   GatewayConfig,
   HubConfig,
   HubRegistrationData,
+  IdentityData,
   OpenClawPluginApi,
   RegistrationConfig,
 } from "./types.js";
+import { buildAgentCard } from "./agent-card.js";
 import { loadOrCreateIdentity } from "./identity-store.js";
 
 const REGISTRATION_FILENAME = "a2a-registration.json";
@@ -57,6 +61,7 @@ interface HubAgentDto {
   signingKeyVersion?: number;
   signingAlgorithm?: string;
   signingKeyStatus?: string;
+  connectionDescriptor?: ConnectionDescriptor;
   username?: string;
   email?: string;
 }
@@ -74,6 +79,7 @@ interface CreateAgentPayload {
   clientVersion?: string;
   username?: string;
   email?: string;
+  connectionDescriptor?: ConnectionDescriptor;
 }
 
 async function registerHubUser(
@@ -152,6 +158,107 @@ function flattenSkills(skills: Array<{ id?: string; name: string; description?: 
   return skills.map((s) => (typeof s === "string" ? s : s.name));
 }
 
+function authMode(config: GatewayConfig): string {
+  return config.security?.inboundAuth === "bearer" ? "bearer" : "none";
+}
+
+function normalizeTransport(transport: string): string {
+  switch (transport) {
+    case "JSONRPC":
+      return "jsonrpc";
+    case "HTTP+JSON":
+      return "http-json";
+    case "GRPC":
+      return "grpc";
+    default:
+      return transport.toLowerCase();
+  }
+}
+
+function endpointAgentCardUrl(url: string): string | undefined {
+  try {
+    return `${new URL(url).origin}/.well-known/agent.json`;
+  } catch {
+    return undefined;
+  }
+}
+
+function dedupeEndpoints(endpoints: ConnectionEndpoint[]): ConnectionEndpoint[] {
+  const seen = new Set<string>();
+  return endpoints.filter((endpoint) => {
+    const key = `${endpoint.protocol}:${endpoint.transport}:${endpoint.url}`;
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
+}
+
+export function buildHubConnectionDescriptor(
+  config: GatewayConfig,
+  identity: Pick<IdentityData, "clientId" | "publicKey" | "keyVersion" | "signingPublicKey" | "signingKeyVersion" | "signingAlgorithm">,
+  skills: string[],
+): ConnectionDescriptor {
+  const agentCard = buildAgentCard(config);
+  const endpoints = dedupeEndpoints(
+    (agentCard.additionalInterfaces && agentCard.additionalInterfaces.length > 0
+      ? agentCard.additionalInterfaces
+      : [{ url: agentCard.url, transport: agentCard.preferredTransport ?? "JSONRPC" }]
+    ).map((endpoint) => {
+      const agentCardUrl = endpointAgentCardUrl(endpoint.url);
+      return {
+        protocol: "a2a",
+        transport: normalizeTransport(endpoint.transport),
+        url: endpoint.url,
+        auth: authMode(config),
+        metadata: agentCardUrl ? { agentCardUrl } : undefined,
+      };
+    }),
+  );
+
+  return {
+    version: "openclaw-connect/1",
+    clientId: identity.clientId,
+    displayName: agentCard.name,
+    publicKeys: {
+      encryption: {
+        type: "X25519",
+        publicKey: identity.publicKey,
+        keyVersion: identity.keyVersion,
+      },
+      signing: identity.signingPublicKey
+        ? {
+            type: "Ed25519",
+            publicKey: identity.signingPublicKey,
+            keyVersion: identity.signingKeyVersion ?? 1,
+            algorithm: identity.signingAlgorithm ?? "ed25519",
+            status: "active",
+          }
+        : undefined,
+    },
+    endpoints,
+    capabilities: {
+      skills,
+      protocols: ["a2a"],
+      inputModes: agentCard.defaultInputModes ?? ["text"],
+      outputModes: agentCard.defaultOutputModes ?? ["text"],
+      metadata: {
+        streaming: agentCard.capabilities.streaming,
+        pushNotifications: agentCard.capabilities.pushNotifications,
+      },
+    },
+    metadata: {
+      implementation: "claw-crony",
+      agentCardProtocolVersion: agentCard.protocolVersion,
+    },
+  };
+}
+
+function sameDescriptor(a?: ConnectionDescriptor, b?: ConnectionDescriptor): boolean {
+  return JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+}
+
 function hasMatchingSigningKey(agent: HubAgentDto, signingPublicKey?: string): boolean {
   return Boolean(
     signingPublicKey &&
@@ -177,6 +284,12 @@ export async function runHubRegistration(
   const configDir = getConfigDir();
   const hubUrl = hubConfig.url;
   const identity = loadOrCreateIdentity(registrationConfig.clientId);
+  const name = config.agentCard.name;
+  const description = config.agentCard.description ?? "";
+  const skills = flattenSkills(config.agentCard.skills);
+  const username = registrationConfig.username ?? name;
+  const email = registrationConfig.email ?? "";
+  const connectionDescriptor = buildHubConnectionDescriptor(config, identity, skills);
 
   if (!fs.existsSync(configDir)) {
     fs.mkdirSync(configDir, { recursive: true });
@@ -188,7 +301,8 @@ export async function runHubRegistration(
     existing.hubUrl === hubUrl &&
     existing.clientId === identity.clientId &&
     existing.publicKey === identity.publicKey &&
-    existing.signingPublicKey === identity.signingPublicKey
+    existing.signingPublicKey === identity.signingPublicKey &&
+    sameDescriptor(existing.connectionDescriptor, connectionDescriptor)
   ) {
     try {
       const agent = await lookupAgentByClientId(hubUrl, identity.clientId);
@@ -206,12 +320,6 @@ export async function runHubRegistration(
     }
   }
 
-  const name = config.agentCard.name;
-  const description = config.agentCard.description ?? "";
-  const skills = flattenSkills(config.agentCard.skills);
-  const username = registrationConfig.username ?? name;
-  const email = registrationConfig.email ?? "";
-
   const payload: CreateAgentPayload = {
     name,
     description,
@@ -225,6 +333,7 @@ export async function runHubRegistration(
     clientVersion: "claw-crony/1.3.0",
     username,
     email,
+    connectionDescriptor,
   };
 
   let agentId: number;
@@ -278,7 +387,7 @@ export async function runHubRegistration(
   }
 
   const registrationData: HubRegistrationData = {
-    version: 3,
+    version: 4,
     hubUrl,
     agentId,
     clientId: identity.clientId,
@@ -291,6 +400,7 @@ export async function runHubRegistration(
     name,
     description,
     skills,
+    connectionDescriptor,
   };
 
   try {

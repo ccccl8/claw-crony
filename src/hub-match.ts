@@ -3,7 +3,7 @@
  */
 
 import { loadRegistration } from "./hub-registration.js";
-import type { HubRegistrationData } from "./types.js";
+import type { ConnectionDescriptor, HubRegistrationData } from "./types.js";
 
 export interface HubAgentDto {
   id: number;
@@ -11,6 +11,8 @@ export interface HubAgentDto {
   skills: string[];
   clientId?: string;
   publicKey?: string;
+  connectionDescriptor?: ConnectionDescriptor;
+  connectionProtocols?: string[];
   presenceStatus?: string;
 }
 

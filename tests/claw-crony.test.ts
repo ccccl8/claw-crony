@@ -4,7 +4,9 @@ import { describe, it } from "node:test";
 
 import plugin from "../index.js";
 import { buildAgentCard } from "../src/agent-card.js";
+import { buildAgentCardUrlFromAddress, resolveA2aAgentCardUrl, resolvePeerAgentCardUrl } from "../src/connection-descriptor.js";
 import { OpenClawAgentExecutor } from "../src/executor.js";
+import { buildHubConnectionDescriptor } from "../src/hub-registration.js";
 import type { GatewayConfig } from "../src/types.js";
 
 import {
@@ -61,6 +63,92 @@ describe("zero-config install (issue #7)", () => {
     assert.equal(card.name, "OpenClaw A2A Gateway", "should use default name");
     assert.equal(card.protocolVersion, "0.3.0");
     assert.equal(card.description, "A2A bridge for OpenClaw agents");
+  });
+
+  it("builds a generic Hub connection descriptor from the A2A server config", () => {
+    const config = makeConfig({
+      agentCard: {
+        name: "Descriptor Agent",
+        description: "descriptor test",
+        url: "https://agent.example/a2a/jsonrpc",
+        skills: [{ name: "chat" }, { name: "code_review" }],
+      },
+      security: {
+        inboundAuth: "bearer",
+        allowedMimeTypes: ["text/plain"],
+        maxFileSizeBytes: 1000,
+        maxInlineFileSizeBytes: 1000,
+        fileUriAllowlist: [],
+      },
+    }) as unknown as GatewayConfig;
+
+    const descriptor = buildHubConnectionDescriptor(
+      config,
+      {
+        clientId: "client-1",
+        publicKey: "x25519-public",
+        keyVersion: 2,
+        signingPublicKey: "ed25519-public",
+        signingKeyVersion: 3,
+        signingAlgorithm: "ed25519",
+      },
+      ["chat", "code_review"],
+    );
+
+    assert.equal(descriptor.version, "openclaw-connect/1");
+    assert.equal(descriptor.clientId, "client-1");
+    assert.equal(descriptor.publicKeys.encryption?.type, "X25519");
+    assert.equal(descriptor.publicKeys.encryption?.publicKey, "x25519-public");
+    assert.equal(descriptor.publicKeys.signing?.type, "Ed25519");
+    assert.equal(descriptor.publicKeys.signing?.publicKey, "ed25519-public");
+    assert.deepEqual(descriptor.capabilities.protocols, ["a2a"]);
+    assert.deepEqual(descriptor.capabilities.skills, ["chat", "code_review"]);
+
+    const jsonRpc = descriptor.endpoints.find((endpoint) => endpoint.transport === "jsonrpc");
+    assert.ok(jsonRpc, "JSON-RPC endpoint should be published");
+    assert.equal(jsonRpc.url, "https://agent.example/a2a/jsonrpc");
+    assert.equal(jsonRpc.auth, "bearer");
+    assert.equal(jsonRpc.metadata?.agentCardUrl, "https://agent.example/.well-known/agent.json");
+
+    assert.ok(descriptor.endpoints.some((endpoint) => endpoint.transport === "http-json"));
+    assert.ok(descriptor.endpoints.some((endpoint) => endpoint.transport === "grpc"));
+  });
+
+  it("resolves A2A agent card URLs from generic connection descriptors", () => {
+    const descriptor = buildHubConnectionDescriptor(
+      makeConfig({
+        agentCard: {
+          name: "Resolver Agent",
+          url: "https://resolver.example/a2a/jsonrpc",
+          skills: ["chat"],
+        },
+      }) as unknown as GatewayConfig,
+      {
+        clientId: "client-2",
+        publicKey: "x25519",
+        keyVersion: 1,
+      },
+      ["chat"],
+    );
+
+    assert.equal(resolveA2aAgentCardUrl(descriptor), "https://resolver.example/.well-known/agent.json");
+  });
+
+  it("falls back to handshake address when peer descriptor has no A2A endpoint", () => {
+    const url = resolvePeerAgentCardUrl(
+      {
+        version: "openclaw-connect/1",
+        clientId: "custom-agent",
+        publicKeys: {},
+        endpoints: [{ protocol: "mcp", transport: "websocket", url: "wss://agent.example/mcp" }],
+        capabilities: { skills: ["chat"], protocols: ["mcp"] },
+      },
+      "10.1.2.3:18800",
+      "/custom-agent-card.json",
+    );
+
+    assert.equal(url, "http://10.1.2.3:18800/custom-agent-card.json");
+    assert.equal(buildAgentCardUrlFromAddress("https://agent.example", "agent.json"), "https://agent.example/agent.json");
   });
 });
 

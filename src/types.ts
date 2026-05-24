@@ -144,6 +144,46 @@ export interface ProfileConfig {
 }
 
 // ---------------------------------------------------------------------------
+// Hub generic connection descriptor
+// ---------------------------------------------------------------------------
+
+export interface ConnectionDescriptor {
+  version: "openclaw-connect/1";
+  clientId: string;
+  displayName?: string;
+  publicKeys: {
+    signing?: ConnectionKeyRef;
+    encryption?: ConnectionKeyRef;
+  };
+  endpoints: ConnectionEndpoint[];
+  capabilities: {
+    skills: string[];
+    protocols: string[];
+    inputModes?: string[];
+    outputModes?: string[];
+    metadata?: Record<string, unknown>;
+  };
+  metadata?: Record<string, unknown>;
+  expiresAt?: string;
+}
+
+export interface ConnectionKeyRef {
+  type: string;
+  publicKey: string;
+  keyVersion?: number;
+  algorithm?: string;
+  status?: string;
+}
+
+export interface ConnectionEndpoint {
+  protocol: string;
+  transport: string;
+  url: string;
+  auth?: string;
+  metadata?: Record<string, unknown>;
+}
+
+// ---------------------------------------------------------------------------
 // Hub registration data (persisted to ~/.openclaw/a2a-registration.json)
 // ---------------------------------------------------------------------------
 
@@ -161,6 +201,7 @@ export interface HubRegistrationData {
   name: string;
   description: string;
   skills: string[];
+  connectionDescriptor?: ConnectionDescriptor;
 }
 
 export interface IdentityData {

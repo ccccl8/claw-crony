@@ -37,6 +37,7 @@ import { isRetryableTransportError } from "./src/transport-fallback.js";
 import { decryptHandshake, encryptHandshake } from "./src/handshake-crypto.js";
 import { isValidEphemeralInboundToken, issueEphemeralInboundToken } from "./src/ephemeral-token.js";
 import { loadIdentity } from "./src/identity-store.js";
+import { resolvePeerAgentCardUrl } from "./src/connection-descriptor.js";
 import type { RoutingRule } from "./src/types.js";
 import type {
   AgentCardConfig,
@@ -324,13 +325,9 @@ function getAdvertisedAddress(config: GatewayConfig): string | null {
 function upsertEphemeralPeer(
   config: GatewayConfig,
   peerName: string,
-  address: string,
+  agentCardUrl: string,
   token: string,
 ) {
-  const normalizedAddress = address.startsWith("http://") || address.startsWith("https://")
-    ? address
-    : `http://${address}`;
-  const agentCardUrl = `${normalizedAddress}/.well-known/agent.json`;
   const existing = config.peers.find((peer) => peer.name === peerName);
   if (existing) {
     existing.agentCardUrl = agentCardUrl;
@@ -449,7 +446,13 @@ async function processPendingHubMatches(
         const remoteName = match.callerRole === "provider"
           ? (match.requester?.name ?? `agent-${decrypted.fromAgentId}`)
           : (match.provider?.name ?? `agent-${decrypted.fromAgentId}`);
-        upsertEphemeralPeer(config, remoteName, decrypted.address, decrypted.token);
+        const remoteAgent = match.callerRole === "provider" ? match.requester : match.provider;
+        const remoteAgentCardUrl = resolvePeerAgentCardUrl(
+          remoteAgent?.connectionDescriptor,
+          decrypted.address,
+          decrypted.agentCardPath,
+        );
+        upsertEphemeralPeer(config, remoteName, remoteAgentCardUrl, decrypted.token);
         historyStore?.record({
           type: "peer.upserted",
           status: "success",
@@ -457,7 +460,8 @@ async function processPendingHubMatches(
           matchId: match.id,
           peer: remoteName,
           detail: {
-            agentCardUrl: config.peers.find((peer) => peer.name === remoteName)?.agentCardUrl,
+            agentCardUrl: remoteAgentCardUrl,
+            source: remoteAgent?.connectionDescriptor ? "connection_descriptor" : "handshake_payload",
             tokenExpiresAt: decrypted.tokenExpiresAt,
           },
         });
@@ -981,7 +985,12 @@ const plugin = {
             tokenExpiresAt: remotePayload.tokenExpiresAt,
           },
         });
-        upsertEphemeralPeer(config, provider.name, remotePayload.address, remotePayload.token);
+        const providerAgentCardUrl = resolvePeerAgentCardUrl(
+          provider.connectionDescriptor,
+          remotePayload.address,
+          remotePayload.agentCardPath,
+        );
+        upsertEphemeralPeer(config, provider.name, providerAgentCardUrl, remotePayload.token);
         historyStore.record({
           type: "peer.upserted",
           status: "success",
@@ -989,7 +998,8 @@ const plugin = {
           matchId: match.id,
           peer: provider.name,
           detail: {
-            agentCardUrl: config.peers.find((peer) => peer.name === provider.name)?.agentCardUrl,
+            agentCardUrl: providerAgentCardUrl,
+            source: provider.connectionDescriptor ? "connection_descriptor" : "handshake_payload",
             tokenExpiresAt: remotePayload.tokenExpiresAt,
           },
         });
