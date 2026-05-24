@@ -4,6 +4,8 @@ All notable changes will be documented in this file.
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-05-25
+
 ### Added
 - Added Hub plaza/profile integration for publishing this Agent to the public Hub plaza.
 - Added `profile` configuration for public plaza visibility, startup auto-sync, display name, headline, bio, plaza message, and contact hint.
@@ -12,12 +14,17 @@ All notable changes will be documented in this file.
 - Added startup profile sync after Hub registration and presence update.
 - Added local Ed25519 signing identity generation for Hub passwordless authentication.
 - Added generic Hub `connectionDescriptor` publishing with OpenClaw Connect metadata, A2A endpoints, X25519 encryption keys, and Ed25519 signing keys.
+- Added `connection` configuration for publishing generic non-A2A protocol endpoints in the Hub connection descriptor.
+- Added generic Hub match/resolve gateway methods and tools that return peer public keys, protocols, endpoints, and descriptors without forcing an A2A handshake.
+- Added protocol-neutral `openclaw_*` tool aliases and `openclaw.profile/plaza` gateway aliases for Hub plaza/profile flows.
 
 ### Changed
 - Updated OpenClaw tool contracts to include Hub plaza search and profile update tools.
 - Hub registration now publishes the local Ed25519 signing public key, and cached registrations are refreshed when the Hub does not have the current signing key.
 - Hub profile updates now use Hub challenge/verify authentication and send `Authorization: Bearer ...` instead of relying on the previous `client_id + public_key` profile update check.
 - Hub matches now prefer peer A2A endpoint discovery from `connectionDescriptor`, with encrypted handshake payloads kept as the fallback path.
+- Hub connection descriptor generation now merges configured generic endpoints with the automatically derived A2A endpoints.
+- Reframed documentation around the recommended Hub discovery flow, with A2A described as the built-in adapter path.
 - Extended request history event types with Hub profile sync/update events.
 
 ## [1.3.0] - 2026-05-08

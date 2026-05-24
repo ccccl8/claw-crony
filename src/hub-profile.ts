@@ -19,6 +19,7 @@ export interface PlazaAgentView {
   plazaEnabled?: boolean;
   skills: string[];
   displaySkills?: string[];
+  connectionProtocols?: string[];
   presenceStatus?: string;
   clientVersion?: string;
   lastSeenAt?: string | null;

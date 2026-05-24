@@ -175,6 +175,10 @@ function normalizeTransport(transport: string): string {
   }
 }
 
+function normalizeProtocol(protocol: string): string {
+  return protocol.trim().toLowerCase();
+}
+
 function endpointAgentCardUrl(url: string): string | undefined {
   try {
     return `${new URL(url).origin}/.well-known/agent.json`;
@@ -183,15 +187,73 @@ function endpointAgentCardUrl(url: string): string | undefined {
   }
 }
 
+function normalizeEndpoint(endpoint: ConnectionEndpoint): ConnectionEndpoint | null {
+  const protocol = normalizeProtocol(endpoint.protocol ?? "");
+  const transport = normalizeTransport(endpoint.transport ?? "");
+  const url = endpoint.url?.trim() ?? "";
+  if (!protocol || !transport || !url) {
+    return null;
+  }
+
+  const auth = endpoint.auth?.trim();
+  return {
+    protocol,
+    transport,
+    url,
+    auth: auth || undefined,
+    metadata: endpoint.metadata && Object.keys(endpoint.metadata).length > 0 ? endpoint.metadata : undefined,
+  };
+}
+
 function dedupeEndpoints(endpoints: ConnectionEndpoint[]): ConnectionEndpoint[] {
   const seen = new Set<string>();
-  return endpoints.filter((endpoint) => {
-    const key = `${endpoint.protocol}:${endpoint.transport}:${endpoint.url}`;
+  const result: ConnectionEndpoint[] = [];
+
+  for (const endpoint of endpoints) {
+    const normalized = normalizeEndpoint(endpoint);
+    if (!normalized) {
+      continue;
+    }
+
+    const key = `${normalized.protocol}:${normalized.transport}:${normalized.url}`;
     if (seen.has(key)) {
-      return false;
+      continue;
     }
     seen.add(key);
-    return true;
+    result.push(normalized);
+  }
+
+  return result;
+}
+
+function dedupeStringList(values: string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const value of values) {
+    const normalized = value.trim().toLowerCase();
+    if (!normalized || seen.has(normalized)) {
+      continue;
+    }
+    seen.add(normalized);
+    result.push(normalized);
+  }
+  return result;
+}
+
+function buildA2aEndpoints(config: GatewayConfig): ConnectionEndpoint[] {
+  const agentCard = buildAgentCard(config);
+  return (agentCard.additionalInterfaces && agentCard.additionalInterfaces.length > 0
+    ? agentCard.additionalInterfaces
+    : [{ url: agentCard.url, transport: agentCard.preferredTransport ?? "JSONRPC" }]
+  ).map((endpoint) => {
+    const agentCardUrl = endpointAgentCardUrl(endpoint.url);
+    return {
+      protocol: "a2a",
+      transport: normalizeTransport(endpoint.transport),
+      url: endpoint.url,
+      auth: authMode(config),
+      metadata: agentCardUrl ? { agentCardUrl } : undefined,
+    };
   });
 }
 
@@ -201,21 +263,22 @@ export function buildHubConnectionDescriptor(
   skills: string[],
 ): ConnectionDescriptor {
   const agentCard = buildAgentCard(config);
-  const endpoints = dedupeEndpoints(
-    (agentCard.additionalInterfaces && agentCard.additionalInterfaces.length > 0
-      ? agentCard.additionalInterfaces
-      : [{ url: agentCard.url, transport: agentCard.preferredTransport ?? "JSONRPC" }]
-    ).map((endpoint) => {
-      const agentCardUrl = endpointAgentCardUrl(endpoint.url);
-      return {
-        protocol: "a2a",
-        transport: normalizeTransport(endpoint.transport),
-        url: endpoint.url,
-        auth: authMode(config),
-        metadata: agentCardUrl ? { agentCardUrl } : undefined,
-      };
-    }),
-  );
+  const publishA2a = config.connection?.publishA2a !== false;
+  const endpoints = dedupeEndpoints([
+    ...(publishA2a ? buildA2aEndpoints(config) : []),
+    ...(config.connection?.endpoints ?? []),
+  ]);
+  const protocols = dedupeStringList([
+    ...(publishA2a ? ["a2a"] : []),
+    ...(config.connection?.protocols ?? []),
+    ...endpoints.map((endpoint) => endpoint.protocol),
+  ]);
+  const inputModes = config.connection?.inputModes?.length
+    ? config.connection.inputModes
+    : agentCard.defaultInputModes ?? ["text"];
+  const outputModes = config.connection?.outputModes?.length
+    ? config.connection.outputModes
+    : agentCard.defaultOutputModes ?? ["text"];
 
   return {
     version: "openclaw-connect/1",
@@ -240,9 +303,9 @@ export function buildHubConnectionDescriptor(
     endpoints,
     capabilities: {
       skills,
-      protocols: ["a2a"],
-      inputModes: agentCard.defaultInputModes ?? ["text"],
-      outputModes: agentCard.defaultOutputModes ?? ["text"],
+      protocols,
+      inputModes,
+      outputModes,
       metadata: {
         streaming: agentCard.capabilities.streaming,
         pushNotifications: agentCard.capabilities.pushNotifications,
@@ -251,6 +314,7 @@ export function buildHubConnectionDescriptor(
     metadata: {
       implementation: "claw-crony",
       agentCardProtocolVersion: agentCard.protocolVersion,
+      ...(config.connection?.metadata ? { custom: config.connection.metadata } : {}),
     },
   };
 }
@@ -330,7 +394,7 @@ export async function runHubRegistration(
     signingPublicKey: identity.signingPublicKey,
     signingKeyVersion: identity.signingKeyVersion ?? 1,
     signingAlgorithm: "ed25519",
-    clientVersion: "claw-crony/1.3.0",
+    clientVersion: "claw-crony/1.4.0",
     username,
     email,
     connectionDescriptor,

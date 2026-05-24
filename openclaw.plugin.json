@@ -1,8 +1,8 @@
 {
   "id": "claw-crony",
   "name": "Claw Crony",
-  "description": "OpenClaw A2A v0.3.0 gateway with Agent Card, JSON-RPC, REST, routing rules, transport fallback, and Hub matchmaking",
-  "version": "1.3.0",
+  "description": "OpenClaw Hub connector with public agent discovery and a built-in A2A v0.3.0 adapter",
+  "version": "1.4.0",
   "activation": {
     "onStartup": true
   },
@@ -10,6 +10,10 @@
     "tools": [
       "a2a_send_file",
       "a2a_match_request",
+      "openclaw_match_agent",
+      "openclaw_resolve_agent",
+      "openclaw_plaza_search",
+      "openclaw_update_profile",
       "a2a_plaza_search",
       "a2a_update_profile"
     ]
@@ -28,6 +32,10 @@
     "profile": {
       "plazaEnabled": true,
       "autoSyncOnStartup": true
+    },
+    "connection": {
+      "publishA2a": true,
+      "endpoints": []
     }
   },
   "configSchema": {
@@ -102,6 +110,70 @@
           "bio": { "type": "string" },
           "plazaMessage": { "type": "string" },
           "contactHint": { "type": "string" }
+        }
+      },
+      "connection": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Generic Hub connection descriptor settings. Use endpoints to publish non-A2A connection information to the Hub.",
+        "properties": {
+          "publishA2a": {
+            "type": "boolean",
+            "default": true,
+            "description": "Whether to automatically publish this plugin's A2A endpoints in the Hub connection descriptor."
+          },
+          "protocols": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Additional protocol names to advertise, such as mcp, custom-http, websocket, or openapi."
+          },
+          "inputModes": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Optional generic input modes for the Hub connection descriptor."
+          },
+          "outputModes": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Optional generic output modes for the Hub connection descriptor."
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "Optional custom metadata included under connectionDescriptor.metadata.custom."
+          },
+          "endpoints": {
+            "type": "array",
+            "description": "Generic endpoints published to the Hub for peer discovery.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "protocol": {
+                  "type": "string",
+                  "description": "Protocol name, for example a2a, mcp, custom-http, websocket, or openapi."
+                },
+                "transport": {
+                  "type": "string",
+                  "description": "Transport name, for example jsonrpc, http-json, websocket, grpc, or stdio-bridge."
+                },
+                "url": {
+                  "type": "string",
+                  "description": "Reachable endpoint URL or address for the protocol."
+                },
+                "auth": {
+                  "type": "string",
+                  "description": "Public auth mode hint, for example none, bearer, api-key, oauth, or custom."
+                },
+                "metadata": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "description": "Protocol-specific public endpoint metadata."
+                }
+              },
+              "required": ["protocol", "transport", "url"]
+            }
+          }
         }
       },
       "server": {

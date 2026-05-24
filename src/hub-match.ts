@@ -8,12 +8,24 @@ import type { ConnectionDescriptor, HubRegistrationData } from "./types.js";
 export interface HubAgentDto {
   id: number;
   name: string;
+  description?: string;
   skills: string[];
+  status?: string;
   clientId?: string;
   publicKey?: string;
+  keyVersion?: number;
+  signingPublicKey?: string;
+  signingKeyVersion?: number;
+  signingAlgorithm?: string;
+  signingKeyStatus?: string;
   connectionDescriptor?: ConnectionDescriptor;
   connectionProtocols?: string[];
   presenceStatus?: string;
+  lastSeenAt?: string | null;
+  clientVersion?: string;
+  identityStatus?: string;
+  username?: string;
+  email?: string;
 }
 
 export interface HubMatchResult {
@@ -104,11 +116,20 @@ export class HubMatchClient {
     return this.request<HubMatchResult>(path);
   }
 
+  async getAgent(agentId: number): Promise<HubAgentDto> {
+    return this.request<HubAgentDto>(`/api/agents/${agentId}`);
+  }
+
+  async findAgentByClientId(clientId: string): Promise<HubAgentDto | null> {
+    const agents = await this.request<HubAgentDto[]>(`/api/agents?clientId=${encodeURIComponent(clientId)}`);
+    return agents.length > 0 ? agents[0] : null;
+  }
+
   async getPendingMatches(): Promise<HubMatchResult[]> {
     return this.request<HubMatchResult[]>(`/api/matches/pending?agentId=${this.registration.agentId}`);
   }
 
-  async updatePresence(presenceStatus: "online" | "offline" | "busy", clientVersion = "claw-crony/1.3.0"): Promise<HubAgentDto> {
+  async updatePresence(presenceStatus: "online" | "offline" | "busy", clientVersion = "claw-crony/1.4.0"): Promise<HubAgentDto> {
     return this.request<HubAgentDto>(`/api/agents/${this.registration.agentId}/presence`, {
       method: "PUT",
       body: JSON.stringify({

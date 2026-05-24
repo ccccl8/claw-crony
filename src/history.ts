@@ -5,6 +5,9 @@ import readline from "node:readline";
 export type RequestHistoryType =
   | "match.created"
   | "match.failed"
+  | "match.resolved"
+  | "resolve.completed"
+  | "resolve.failed"
   | "handshake.offer_sent"
   | "handshake.offer_received"
   | "handshake.answer_sent"

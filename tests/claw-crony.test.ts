@@ -2,11 +2,12 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 
-import plugin from "../index.js";
+import plugin, { parseConfig } from "../index.js";
 import { buildAgentCard } from "../src/agent-card.js";
 import { buildAgentCardUrlFromAddress, resolveA2aAgentCardUrl, resolvePeerAgentCardUrl } from "../src/connection-descriptor.js";
 import { OpenClawAgentExecutor } from "../src/executor.js";
 import { buildHubConnectionDescriptor } from "../src/hub-registration.js";
+import { buildAgentResolution, buildGenericMatchResolution, formatResolvedHubAgent } from "../src/hub-resolve.js";
 import type { GatewayConfig } from "../src/types.js";
 
 import {
@@ -30,6 +31,11 @@ describe("zero-config install (issue #7)", () => {
     assert.ok(harness.methods.has("a2a.match"), "a2a.match method should be registered");
     assert.ok(harness.methods.has("a2a.history"), "a2a.history method should be registered");
     assert.ok(harness.methods.has("a2a.peers"), "a2a.peers method should be registered");
+    assert.ok(harness.methods.has("openclaw.match"), "openclaw.match method should be registered");
+    assert.ok(harness.methods.has("openclaw.resolve"), "openclaw.resolve method should be registered");
+    assert.ok(harness.methods.has("openclaw.plaza.list"), "openclaw.plaza.list method should be registered");
+    assert.ok(harness.methods.has("openclaw.profile.get"), "openclaw.profile.get method should be registered");
+    assert.ok(harness.methods.has("openclaw.profile.update"), "openclaw.profile.update method should be registered");
     assert.ok(harness.methods.has("a2a.plaza.list"), "a2a.plaza.list method should be registered");
     assert.ok(harness.methods.has("a2a.profile.get"), "a2a.profile.get method should be registered");
     assert.ok(harness.methods.has("a2a.profile.update"), "a2a.profile.update method should be registered");
@@ -42,6 +48,10 @@ describe("zero-config install (issue #7)", () => {
     assert.deepEqual(manifest.contracts?.tools, [
       "a2a_send_file",
       "a2a_match_request",
+      "openclaw_match_agent",
+      "openclaw_resolve_agent",
+      "openclaw_plaza_search",
+      "openclaw_update_profile",
       "a2a_plaza_search",
       "a2a_update_profile",
     ]);
@@ -52,6 +62,17 @@ describe("zero-config install (issue #7)", () => {
 
     assert.ok(registration.hooks.has("gateway_start"), "gateway_start hook should be registered");
     assert.ok(registration.hooks.has("gateway_stop"), "gateway_stop hook should be registered");
+  });
+
+  it("registers OpenClaw tool aliases for Hub plaza and profile flows", () => {
+    const registration = registerPlugin({});
+
+    assert.ok(registration.tools.has("openclaw_match_agent"), "openclaw_match_agent should be registered");
+    assert.ok(registration.tools.has("openclaw_resolve_agent"), "openclaw_resolve_agent should be registered");
+    assert.ok(registration.tools.has("openclaw_plaza_search"), "openclaw_plaza_search should be registered");
+    assert.ok(registration.tools.has("openclaw_update_profile"), "openclaw_update_profile should be registered");
+    assert.ok(registration.tools.has("a2a_plaza_search"), "legacy a2a_plaza_search should remain registered");
+    assert.ok(registration.tools.has("a2a_update_profile"), "legacy a2a_update_profile should remain registered");
   });
 
   it("builds Agent Card with defaults when agentCard fields are missing", () => {
@@ -112,6 +133,209 @@ describe("zero-config install (issue #7)", () => {
 
     assert.ok(descriptor.endpoints.some((endpoint) => endpoint.transport === "http-json"));
     assert.ok(descriptor.endpoints.some((endpoint) => endpoint.transport === "grpc"));
+  });
+
+  it("parses generic connection configuration for Hub publication", () => {
+    const config = parseConfig({
+      connection: {
+        publishA2a: false,
+        protocols: ["mcp", "custom-http"],
+        inputModes: ["text", "json"],
+        outputModes: ["json"],
+        metadata: { owner: "local-agent" },
+        endpoints: [
+          {
+            protocol: "MCP",
+            transport: "WebSocket",
+            url: "wss://agent.example/mcp",
+            auth: "bearer",
+            metadata: { path: "/mcp" },
+          },
+          {
+            protocol: "custom-http",
+            transport: "HTTP",
+            url: "https://agent.example/custom",
+          },
+          {
+            protocol: "invalid",
+            transport: "http",
+            url: "",
+          },
+        ],
+      },
+    });
+
+    assert.equal(config.connection.publishA2a, false);
+    assert.deepEqual(config.connection.protocols, ["mcp", "custom-http"]);
+    assert.deepEqual(config.connection.inputModes, ["text", "json"]);
+    assert.deepEqual(config.connection.outputModes, ["json"]);
+    assert.deepEqual(config.connection.metadata, { owner: "local-agent" });
+    assert.equal(config.connection.endpoints.length, 2);
+    assert.deepEqual(config.connection.endpoints[0], {
+      protocol: "mcp",
+      transport: "websocket",
+      url: "wss://agent.example/mcp",
+      auth: "bearer",
+      metadata: { path: "/mcp" },
+    });
+  });
+
+  it("merges configured generic endpoints into the Hub connection descriptor", () => {
+    const config = makeConfig({
+      connection: {
+        endpoints: [
+          {
+            protocol: "mcp",
+            transport: "websocket",
+            url: "wss://agent.example/mcp",
+            auth: "bearer",
+            metadata: { server: "tools" },
+          },
+        ],
+        protocols: ["mcp"],
+        inputModes: ["text", "json"],
+        outputModes: ["json"],
+        metadata: { owner: "ops" },
+      },
+    }) as unknown as GatewayConfig;
+
+    const descriptor = buildHubConnectionDescriptor(
+      config,
+      {
+        clientId: "client-generic",
+        publicKey: "x25519",
+        keyVersion: 1,
+      },
+      ["chat"],
+    );
+
+    assert.deepEqual(descriptor.capabilities.protocols, ["a2a", "mcp"]);
+    assert.deepEqual(descriptor.capabilities.inputModes, ["text", "json"]);
+    assert.deepEqual(descriptor.capabilities.outputModes, ["json"]);
+    assert.deepEqual(descriptor.metadata?.custom, { owner: "ops" });
+    assert.ok(descriptor.endpoints.some((endpoint) => endpoint.protocol === "a2a"));
+    assert.ok(descriptor.endpoints.some((endpoint) => (
+      endpoint.protocol === "mcp" &&
+      endpoint.transport === "websocket" &&
+      endpoint.url === "wss://agent.example/mcp" &&
+      endpoint.auth === "bearer" &&
+      endpoint.metadata?.server === "tools"
+    )));
+  });
+
+  it("can publish only configured generic endpoints when A2A publication is disabled", () => {
+    const descriptor = buildHubConnectionDescriptor(
+      makeConfig({
+        connection: {
+          publishA2a: false,
+          endpoints: [
+            {
+              protocol: "mcp",
+              transport: "websocket",
+              url: "wss://agent.example/mcp",
+            },
+          ],
+        },
+      }) as unknown as GatewayConfig,
+      {
+        clientId: "client-mcp",
+        publicKey: "x25519",
+        keyVersion: 1,
+      },
+      ["tool_use"],
+    );
+
+    assert.deepEqual(descriptor.capabilities.protocols, ["mcp"]);
+    assert.equal(resolveA2aAgentCardUrl(descriptor), null);
+    assert.equal(descriptor.endpoints.length, 1);
+    assert.equal(descriptor.endpoints[0].protocol, "mcp");
+  });
+
+  it("builds generic Hub match resolution output from match descriptors", () => {
+    const resolution = buildGenericMatchResolution(
+      {
+        id: 77,
+        status: "pending",
+        callerRole: "requester",
+        requester: {
+          id: 10,
+          name: "Requester",
+          skills: ["chat"],
+          clientId: "client-local",
+        },
+        provider: {
+          id: 11,
+          name: "Provider",
+          skills: ["tool_use"],
+          clientId: "client-peer",
+          publicKey: "x25519-peer",
+          keyVersion: 2,
+          signingPublicKey: "ed25519-peer",
+          signingKeyVersion: 3,
+          connectionDescriptor: {
+            version: "openclaw-connect/1",
+            clientId: "client-peer",
+            publicKeys: {},
+            endpoints: [
+              {
+                protocol: "mcp",
+                transport: "websocket",
+                url: "wss://provider.example/mcp",
+              },
+            ],
+            capabilities: {
+              skills: ["tool_use"],
+              protocols: ["mcp"],
+            },
+          },
+          presenceStatus: "online",
+        },
+      },
+      10,
+    );
+
+    assert.equal(resolution.ok, true);
+    assert.equal(resolution.mode, "generic_match");
+    assert.equal(resolution.matchId, 77);
+    assert.equal(resolution.peer?.agentId, 11);
+    assert.equal(resolution.peer?.publicKeys.encryption?.publicKey, "x25519-peer");
+    assert.equal(resolution.peer?.publicKeys.signing?.publicKey, "ed25519-peer");
+    assert.deepEqual(resolution.peer?.connectionProtocols, ["mcp"]);
+    assert.equal(resolution.peer?.endpoints[0].url, "wss://provider.example/mcp");
+    assert.ok(formatResolvedHubAgent(resolution.peer).includes("mcp/websocket"));
+  });
+
+  it("builds direct Hub agent resolution output", () => {
+    const resolution = buildAgentResolution(
+      {
+        id: 42,
+        name: "Standalone Agent",
+        skills: ["search"],
+        connectionProtocols: ["custom-http"],
+        connectionDescriptor: {
+          version: "openclaw-connect/1",
+          clientId: "standalone",
+          publicKeys: {},
+          endpoints: [
+            {
+              protocol: "custom-http",
+              transport: "http-json",
+              url: "https://standalone.example/api",
+            },
+          ],
+          capabilities: {
+            skills: ["search"],
+            protocols: ["custom-http"],
+          },
+        },
+      },
+      10,
+    );
+
+    assert.equal(resolution.mode, "resolve");
+    assert.equal(resolution.peer?.agentId, 42);
+    assert.deepEqual(resolution.peer?.connectionProtocols, ["custom-http"]);
+    assert.equal(resolution.peer?.endpoints[0].transport, "http-json");
   });
 
   it("resolves A2A agent card URLs from generic connection descriptors", () => {

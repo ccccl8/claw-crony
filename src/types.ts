@@ -113,6 +113,7 @@ export interface GatewayConfig {
   hub?: HubConfig;
   registration?: RegistrationConfig;
   profile: ProfileConfig;
+  connection: ConnectionConfig;
 }
 
 // ---------------------------------------------------------------------------
@@ -141,6 +142,15 @@ export interface ProfileConfig {
   bio?: string;
   plazaMessage?: string;
   contactHint?: string;
+}
+
+export interface ConnectionConfig {
+  publishA2a: boolean;
+  endpoints: ConnectionEndpoint[];
+  protocols: string[];
+  inputModes: string[];
+  outputModes: string[];
+  metadata?: Record<string, unknown>;
 }
 
 // ---------------------------------------------------------------------------
