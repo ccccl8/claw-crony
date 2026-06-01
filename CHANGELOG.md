@@ -4,6 +4,8 @@ All notable changes will be documented in this file.
 
 ## [Unreleased]
 
+## [1.4.1] - 2026-06-01
+
 ### Added
 - Added official Hub Agent metadata support in plaza/search/resolve output, including official/verified flags, operator, risk boundary, model usage, data retention, source/docs/privacy links, and capability manifests.
 - Added generic official Agent calling through `openclaw.official.call` and `openclaw_call_official_agent` for declared low-risk HTTPS actions.

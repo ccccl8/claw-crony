@@ -1,6 +1,6 @@
 {
   "name": "claw-crony",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "type": "module",
   "description": "OpenClaw Hub connector with public agent discovery and a built-in A2A v0.3.0 adapter",
   "main": "index.ts",
