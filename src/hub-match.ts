@@ -20,6 +20,21 @@ export interface HubAgentDto {
   signingKeyStatus?: string;
   connectionDescriptor?: ConnectionDescriptor;
   connectionProtocols?: string[];
+  official?: boolean;
+  verified?: boolean;
+  operatorName?: string;
+  sourceRepoUrl?: string;
+  documentationUrl?: string;
+  privacyPolicyUrl?: string;
+  riskBoundary?: string;
+  agentType?: string;
+  domain?: string;
+  modelProvider?: string;
+  modelName?: string;
+  modelDisplayName?: string;
+  modelUsage?: string;
+  dataRetention?: string;
+  capabilityManifest?: Record<string, unknown>;
   presenceStatus?: string;
   lastSeenAt?: string | null;
   clientVersion?: string;
@@ -47,6 +62,15 @@ export interface HubMatchResult {
   requesterReady?: boolean;
   providerReady?: boolean;
   readyForConnect?: boolean;
+}
+
+export interface CreateHubMatchParams {
+  skills: string[];
+  description?: string;
+  connectionMode?: "a2a" | "generic";
+  preferOfficial?: boolean;
+  targetAgentId?: number;
+  targetClientId?: string;
 }
 
 export interface HubHandshakeMessage {
@@ -100,13 +124,17 @@ export class HubMatchClient {
     return res.json() as Promise<T>;
   }
 
-  async createMatch(params: { skills: string[]; description?: string }): Promise<HubMatchResult> {
+  async createMatch(params: CreateHubMatchParams): Promise<HubMatchResult> {
     return this.request<HubMatchResult>("/api/matches", {
       method: "POST",
       body: JSON.stringify({
         agentId: this.registration.agentId,
         requiredSkills: params.skills,
         description: params.description ?? "",
+        connectionMode: params.connectionMode,
+        preferOfficial: params.preferOfficial,
+        targetAgentId: params.targetAgentId,
+        targetClientId: params.targetClientId,
       }),
     });
   }

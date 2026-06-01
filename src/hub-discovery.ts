@@ -10,6 +10,9 @@ import {
 export interface HubDiscoveryMatchInput {
   skills: string[];
   description?: string;
+  preferOfficial?: boolean;
+  targetAgentId?: number;
+  targetClientId?: string;
 }
 
 export interface HubDiscoveryResolveInput {
@@ -18,6 +21,9 @@ export interface HubDiscoveryResolveInput {
   matchId?: number;
   skills?: string[];
   description?: string;
+  preferOfficial?: boolean;
+  targetAgentId?: number;
+  targetClientId?: string;
 }
 
 export interface HubDiscoveryFailure {
@@ -72,6 +78,10 @@ export async function performGenericHubMatch(
     match = await hubClient.createMatch({
       skills: input.skills,
       description: input.description,
+      connectionMode: "generic",
+      preferOfficial: input.preferOfficial,
+      targetAgentId: input.targetAgentId,
+      targetClientId: input.targetClientId,
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -121,6 +131,9 @@ export async function resolveHubPeer(
     return performGenericHubMatch({
       skills: input.skills,
       description: input.description,
+      preferOfficial: input.preferOfficial,
+      targetAgentId: input.targetAgentId,
+      targetClientId: input.targetClientId,
     }, historyStore);
   }
 

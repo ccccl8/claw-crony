@@ -32,6 +32,7 @@ import { runHubRegistration } from "./src/hub-registration.js";
 import { HubMatchClient, type HubHandshakeMessage, type HubMatchResult } from "./src/hub-match.js";
 import { HubProfileClient, syncHubProfile, type HubProfileUpdate } from "./src/hub-profile.js";
 import { performGenericHubMatch, resolveHubPeer } from "./src/hub-discovery.js";
+import { callOfficialAgentAction } from "./src/official-agent-call.js";
 import { normalizeAgentCardSkills } from "./src/skill-catalog.js";
 import { parseRoutingRules, matchRule } from "./src/routing-rules.js";
 import { isRetryableTransportError } from "./src/transport-fallback.js";
@@ -1314,6 +1315,25 @@ const plugin = {
         .catch((error) => respond(false, { error: String(error?.message || error) }));
     });
 
+    api.registerGatewayMethod("openclaw.official.call", ({ params, respond }) => {
+      const payload = asObject(params);
+      const skills = Array.isArray(payload.skills)
+        ? payload.skills.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
+        : undefined;
+      callOfficialAgentAction({
+        agentId: asPositiveInteger(payload.agentId) ?? undefined,
+        clientId: asString(payload.clientId, "").trim() || undefined,
+        skills,
+        description: asString(payload.description, ""),
+        actionName: asString(payload.actionName, ""),
+        body: payload.body,
+        query: asObject(payload.query),
+        preferOfficial: typeof payload.preferOfficial === "boolean" ? payload.preferOfficial : undefined,
+      }, historyStore)
+        .then((result) => respond(result.ok, result.details))
+        .catch((error) => respond(false, { error: String(error?.message || error) }));
+    });
+
     api.registerGatewayMethod("a2a.send", ({ params, respond }) => {
       const payload = asObject(params);
       const peerName = asString(payload.peer || payload.name, "");
@@ -1683,6 +1703,73 @@ const plugin = {
         },
       });
 
+      api.registerTool({
+        name: "openclaw_call_official_agent",
+        description: "Call a low-risk action declared by a Hub official verified agent. " +
+          "This uses the agent's public HTTPS/OpenAPI descriptor and does not perform an A2A encrypted handshake. " +
+          "Inputs are checked locally for sensitive data before the call.",
+        label: "OpenClaw Call Official Agent",
+        parameters: {
+          type: "object" as const,
+          required: ["actionName"],
+          properties: {
+            agentId: {
+              type: "number" as const,
+              description: "Hub Agent id of the official agent to call",
+            },
+            clientId: {
+              type: "string" as const,
+              description: "Hub client id of the official agent, such as official.tencent-delivery-advisor",
+            },
+            skills: {
+              type: "array" as const,
+              items: { type: "string" as const },
+              description: "Optional skills to match when agentId/clientId is not provided. Generic match prefers official agents by default.",
+            },
+            description: {
+              type: "string" as const,
+              description: "Optional match description when resolving by skills",
+            },
+            actionName: {
+              type: "string" as const,
+              description: "Declared low-risk action name, such as next_step_advice or policy",
+            },
+            body: {
+              type: "object" as const,
+              description: "JSON body for POST actions. Do not include tokens, full phone numbers, full addresses, payment data, or order ids.",
+            },
+            query: {
+              type: "object" as const,
+              description: "Query parameters for GET actions",
+            },
+            preferOfficial: {
+              type: "boolean" as const,
+              description: "When resolving by skills, prefer official agents. Defaults to true.",
+            },
+          },
+        },
+        async execute(toolCallId, params) {
+          const input = asObject(params);
+          const skills = Array.isArray(input.skills)
+            ? input.skills.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
+            : undefined;
+          const result = await callOfficialAgentAction({
+            agentId: asPositiveInteger(input.agentId) ?? undefined,
+            clientId: asString(input.clientId, "").trim() || undefined,
+            skills,
+            description: asString(input.description, ""),
+            actionName: asString(input.actionName, ""),
+            body: input.body,
+            query: asObject(input.query),
+            preferOfficial: typeof input.preferOfficial === "boolean" ? input.preferOfficial : undefined,
+          }, historyStore);
+          return {
+            content: [{ type: "text" as const, text: result.text }],
+            details: result.details,
+          };
+        },
+      });
+
       const plazaSearchParameters = {
         type: "object" as const,
         properties: {
@@ -1707,7 +1794,24 @@ const plugin = {
           });
           const preview = agents.slice(0, 10).map((agent) => {
             const skills = (agent.displaySkills?.length ? agent.displaySkills : agent.skills).join(", ");
-            return `- ${agent.displayName || agent.name} (agentId=${agent.agentId}, ${agent.presenceStatus || "unknown"}) skills=[${skills}]`;
+            const trust = [
+              agent.official ? "official" : undefined,
+              agent.verified ? "verified" : undefined,
+              agent.operatorName ? `operator=${agent.operatorName}` : undefined,
+            ].filter(Boolean).join(", ");
+            const model = agent.modelDisplayName
+              || [agent.modelProvider, agent.modelName].filter(Boolean).join(" / ");
+            const facts = [
+              trust ? `trust=[${trust}]` : undefined,
+              agent.riskBoundary ? `boundary=${agent.riskBoundary}` : undefined,
+              agent.agentType ? `type=${agent.agentType}` : undefined,
+              agent.domain ? `domain=${agent.domain}` : undefined,
+              model ? `model=${model}` : undefined,
+              agent.modelUsage ? `modelUse=${agent.modelUsage}` : undefined,
+              agent.dataRetention ? `retention=${agent.dataRetention}` : undefined,
+              agent.connectionProtocols?.length ? `protocols=[${agent.connectionProtocols.join(", ")}]` : undefined,
+            ].filter(Boolean).join(" ");
+            return `- ${agent.displayName || agent.name} (agentId=${agent.agentId}, ${agent.presenceStatus || "unknown"}) ${facts} skills=[${skills}]`;
           }).join("\n");
           return {
             content: [{ type: "text" as const, text: preview || "No public agents found." }],

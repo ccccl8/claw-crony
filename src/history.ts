@@ -24,6 +24,8 @@ export type RequestHistoryType =
   | "send_file.started"
   | "send_file.completed"
   | "send_file.failed"
+  | "official_agent.call_completed"
+  | "official_agent.call_failed"
   | "task.inbound_completed"
   | "task.inbound_failed";
 

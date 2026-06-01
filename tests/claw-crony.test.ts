@@ -50,6 +50,7 @@ describe("zero-config install (issue #7)", () => {
       "a2a_match_request",
       "openclaw_match_agent",
       "openclaw_resolve_agent",
+      "openclaw_call_official_agent",
       "openclaw_plaza_search",
       "openclaw_update_profile",
       "a2a_plaza_search",
@@ -69,6 +70,7 @@ describe("zero-config install (issue #7)", () => {
 
     assert.ok(registration.tools.has("openclaw_match_agent"), "openclaw_match_agent should be registered");
     assert.ok(registration.tools.has("openclaw_resolve_agent"), "openclaw_resolve_agent should be registered");
+    assert.ok(registration.tools.has("openclaw_call_official_agent"), "openclaw_call_official_agent should be registered");
     assert.ok(registration.tools.has("openclaw_plaza_search"), "openclaw_plaza_search should be registered");
     assert.ok(registration.tools.has("openclaw_update_profile"), "openclaw_update_profile should be registered");
     assert.ok(registration.tools.has("a2a_plaza_search"), "legacy a2a_plaza_search should remain registered");

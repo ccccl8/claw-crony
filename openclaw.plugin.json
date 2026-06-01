@@ -12,6 +12,7 @@
       "a2a_match_request",
       "openclaw_match_agent",
       "openclaw_resolve_agent",
+      "openclaw_call_official_agent",
       "openclaw_plaza_search",
       "openclaw_update_profile",
       "a2a_plaza_search",

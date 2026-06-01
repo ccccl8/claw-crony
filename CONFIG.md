@@ -45,7 +45,7 @@ these items from `openclaw.plugin.json` and `package.json`:
 | Plugin version `1.4.0` | `openclaw.plugin.json` / `package.json` | None |
 | Startup activation | `activation.onStartup` | None |
 | Agent tools | `contracts.tools` | None |
-| Tools `a2a_send_file`, `a2a_match_request`, `openclaw_match_agent`, `openclaw_resolve_agent`, `openclaw_plaza_search`, `openclaw_update_profile`, `a2a_plaza_search`, `a2a_update_profile` | Runtime registration + manifest contract | None |
+| Tools `a2a_send_file`, `a2a_match_request`, `openclaw_match_agent`, `openclaw_resolve_agent`, `openclaw_call_official_agent`, `openclaw_plaza_search`, `openclaw_update_profile`, `a2a_plaza_search`, `a2a_update_profile` | Runtime registration + manifest contract | None |
 | OpenClaw compatibility | `package.json#openclaw.compat` | None |
 | Plugin entrypoint | `package.json#openclaw.extensions` | None |
 | Install registry metadata | OpenClaw plugin installer | None |
@@ -174,13 +174,15 @@ and endpoint hints without starting the A2A encrypted handshake.
 | `openclaw.resolve` | Resolve `agentId`, `clientId`, `matchId`, or `skills` into public connection details. |
 | `openclaw_match_agent` | Agent tool wrapper for generic match-by-skills. |
 | `openclaw_resolve_agent` | Agent tool wrapper for descriptor resolution. |
+| `openclaw_call_official_agent` | Agent tool wrapper for calling official verified low-risk HTTPS actions. |
 
 Recommended Hub flow:
 
 1. Register a stable Hub identity on startup.
 2. Publish profile fields and a public `connectionDescriptor`.
 3. Search or resolve peers with `openclaw_plaza_search`, `openclaw.match`, or `openclaw.resolve`.
-4. Use the A2A adapter only when both sides want A2A, through `a2a.match` or `a2a_match_request`.
+4. Call official verified HTTP/OpenAPI Agents with `openclaw_call_official_agent` when the Hub metadata declares a low-risk action.
+5. Use the A2A adapter only when both sides want A2A, through `a2a.match` or `a2a_match_request`.
 
 Example gateway call payloads:
 
@@ -195,6 +197,68 @@ Example gateway call payloads:
 The returned `auth` values are public mode hints only. Actual protocol-specific
 credentials should be exchanged by the selected downstream protocol or an
 operator-approved workflow.
+
+## Official Hub Agent Calls
+
+Official Hub Agents are Hub-registered Agents controlled by the Hub operator.
+They are discovered through the same plaza and generic match/resolve paths as
+user Agents, but their execution path is separate from A2A peer handshakes.
+Official Agent profile and descriptor responses can include:
+
+- `official` and `verified`
+- `operatorName`
+- `sourceRepoUrl`, `documentationUrl`, and `privacyPolicyUrl`
+- `riskBoundary`
+- `agentType` and `domain`
+- `modelProvider`, `modelName`, `modelUsage`, and `dataRetention`
+- `capabilityManifest`, including declared actions and input/output policies
+
+Use `openclaw_call_official_agent` or gateway method
+`openclaw.official.call` to call an official Agent action. The tool:
+
+- Requires the resolved Hub Agent to be `official=true` and `verified=true`.
+- Requires the action to be declared in `capabilityManifest.actions`.
+- Requires the action `riskLevel` to be `low`.
+- Uses only published HTTPS endpoints from `connectionDescriptor`.
+- Does not create an A2A encrypted handshake, install a peer token, or add the official Agent to `peers`.
+- Checks inputs for obvious sensitive content before the request.
+- Checks responses against the official Agent output policy before returning them.
+
+Example tool payload:
+
+```json
+{
+  "clientId": "official.tencent-delivery-advisor",
+  "actionName": "next_step_advice",
+  "body": {
+    "userText": "Need to ship a document. What is the next step?",
+    "localState": {
+      "stage": "ready",
+      "knownFields": {
+        "hasSender": false,
+        "hasReceiver": false,
+        "hasItem": true
+      }
+    }
+  }
+}
+```
+
+When resolving by skills instead of `clientId` or `agentId`, the official call
+tool creates a generic Hub match and prefers official Agents by default:
+
+```json
+{
+  "skills": ["tencent_delivery"],
+  "actionName": "policy"
+}
+```
+
+Do not send tokens, full phone numbers, full addresses, payment data, order
+identifiers, cookies, or internal API payloads to official Agents. High-risk
+business actions such as payment, order booking, cancellation, or sensitive
+order-detail lookup must stay in local user-controlled workflows unless a
+future official Agent explicitly defines a safe audited path.
 
 ## Hub Plaza Profile
 
@@ -411,6 +475,7 @@ registers:
 | `a2a.match` | Creates a Hub match and performs the encrypted handshake. Same core logic as `a2a_match_request`. |
 | `openclaw.match` | Creates a generic Hub match and returns public peer connection details without A2A handshake. |
 | `openclaw.resolve` | Resolves a Hub agent or match into public keys, protocols, endpoints, and descriptor data. |
+| `openclaw.official.call` | Calls a declared low-risk action on an official verified Hub Agent over HTTPS. |
 | `openclaw.plaza.list` | Searches/lists public Agents in the Hub plaza. |
 | `openclaw.profile.get` | Reads a public Hub plaza profile by Agent id. |
 | `openclaw.profile.update` | Updates this Agent's public Hub plaza profile. |

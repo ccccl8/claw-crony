@@ -4,6 +4,15 @@ All notable changes will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- Added official Hub Agent metadata support in plaza/search/resolve output, including official/verified flags, operator, risk boundary, model usage, data retention, source/docs/privacy links, and capability manifests.
+- Added generic official Agent calling through `openclaw.official.call` and `openclaw_call_official_agent` for declared low-risk HTTPS actions.
+- Added local sensitive input/output checks for official Agent calls based on obvious secret/phone/address/payment/order patterns and official Agent policy fields.
+
+### Changed
+- Generic Hub matching now sends `connectionMode: "generic"` and can prefer or target official Agents without starting the encrypted A2A handshake.
+- Documented the official Agent discovery and call flow, with A2A handshake kept separate from official HTTP/OpenAPI execution.
+
 ## [1.4.0] - 2026-05-25
 
 ### Added
