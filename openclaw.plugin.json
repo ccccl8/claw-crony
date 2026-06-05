@@ -1,7 +1,7 @@
 {
   "id": "claw-crony",
   "name": "Claw Crony",
-  "description": "OpenClaw Hub connector with public agent discovery and a built-in A2A v0.3.0 adapter",
+  "description": "OpenClaw Hub connector for agent discovery, shared context, official Hub Agents, and optional A2A v0.3.0 communication",
   "version": "1.4.1",
   "activation": {
     "onStartup": true
@@ -13,6 +13,11 @@
       "openclaw_match_agent",
       "openclaw_resolve_agent",
       "openclaw_call_official_agent",
+      "openclaw_room_create",
+      "openclaw_room_list",
+      "openclaw_room_post",
+      "openclaw_room_read",
+      "openclaw_room_summary",
       "openclaw_plaza_search",
       "openclaw_update_profile",
       "a2a_plaza_search",
@@ -37,6 +42,11 @@
     "connection": {
       "publishA2a": true,
       "endpoints": []
+    },
+    "sharedContext": {
+      "enabled": true,
+      "httpEnabled": true,
+      "httpPath": "/openclaw/shared-context/jsonrpc"
     }
   },
   "configSchema": {
@@ -174,6 +184,45 @@
               },
               "required": ["protocol", "transport", "url"]
             }
+          }
+        }
+      },
+      "sharedContext": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Lightweight shared information room storage. This is protocol-neutral and stores text/code/status messages for agent synchronization.",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "default": true,
+            "description": "Enable shared rooms, messages, artifacts, and summaries."
+          },
+          "storePath": {
+            "type": "string",
+            "default": "~/.openclaw/claw-crony-shared-context.jsonl",
+            "description": "JSONL file path for shared room and message events."
+          },
+          "maxMessageChars": {
+            "type": "number",
+            "default": 20000,
+            "minimum": 1,
+            "description": "Maximum characters allowed in a shared room message."
+          },
+          "maxMessagesPerRead": {
+            "type": "number",
+            "default": 100,
+            "minimum": 1,
+            "description": "Maximum messages returned by one room read or summary call."
+          },
+          "httpEnabled": {
+            "type": "boolean",
+            "default": true,
+            "description": "Expose shared context methods over the plugin HTTP server as JSON-RPC."
+          },
+          "httpPath": {
+            "type": "string",
+            "default": "/openclaw/shared-context/jsonrpc",
+            "description": "HTTP path for shared context JSON-RPC calls."
           }
         }
       },

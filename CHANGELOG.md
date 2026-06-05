@@ -4,6 +4,19 @@ All notable changes will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- Added protocol-neutral shared context rooms backed by an append-only JSONL event store.
+- Added gateway methods `openclaw.room.create`, `openclaw.room.list`, `openclaw.room.post`, `openclaw.room.read`, `openclaw.room.archive`, `openclaw.room.summary`, and `openclaw.artifact.attach`.
+- Added agent tools `openclaw_room_create`, `openclaw_room_list`, `openclaw_room_post`, `openclaw_room_read`, and `openclaw_room_summary`.
+- Added shared context configuration under `sharedContext` for enabling rooms, choosing the store path, and limiting message/read sizes.
+- Added shared context HTTP JSON-RPC at `/openclaw/shared-context/jsonrpc`, configurable through `sharedContext.httpEnabled` and `sharedContext.httpPath`.
+- Added tests for the shared context store and plugin-level gateway/tool surfaces.
+
+### Changed
+- Reframed `claw-crony` documentation around lightweight discovery and information sharing instead of universal agent orchestration.
+- Serialized shared context writes within a plugin instance so multi-event room updates are appended as a contiguous operation.
+- Archived shared rooms are now read-only and excluded from open-room listings.
+
 ## [1.4.1] - 2026-06-01
 
 ### Added

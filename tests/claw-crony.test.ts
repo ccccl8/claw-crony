@@ -33,6 +33,13 @@ describe("zero-config install (issue #7)", () => {
     assert.ok(harness.methods.has("a2a.peers"), "a2a.peers method should be registered");
     assert.ok(harness.methods.has("openclaw.match"), "openclaw.match method should be registered");
     assert.ok(harness.methods.has("openclaw.resolve"), "openclaw.resolve method should be registered");
+    assert.ok(harness.methods.has("openclaw.room.create"), "openclaw.room.create method should be registered");
+    assert.ok(harness.methods.has("openclaw.room.list"), "openclaw.room.list method should be registered");
+    assert.ok(harness.methods.has("openclaw.room.post"), "openclaw.room.post method should be registered");
+    assert.ok(harness.methods.has("openclaw.room.read"), "openclaw.room.read method should be registered");
+    assert.ok(harness.methods.has("openclaw.room.archive"), "openclaw.room.archive method should be registered");
+    assert.ok(harness.methods.has("openclaw.room.summary"), "openclaw.room.summary method should be registered");
+    assert.ok(harness.methods.has("openclaw.artifact.attach"), "openclaw.artifact.attach method should be registered");
     assert.ok(harness.methods.has("openclaw.plaza.list"), "openclaw.plaza.list method should be registered");
     assert.ok(harness.methods.has("openclaw.profile.get"), "openclaw.profile.get method should be registered");
     assert.ok(harness.methods.has("openclaw.profile.update"), "openclaw.profile.update method should be registered");
@@ -51,6 +58,11 @@ describe("zero-config install (issue #7)", () => {
       "openclaw_match_agent",
       "openclaw_resolve_agent",
       "openclaw_call_official_agent",
+      "openclaw_room_create",
+      "openclaw_room_list",
+      "openclaw_room_post",
+      "openclaw_room_read",
+      "openclaw_room_summary",
       "openclaw_plaza_search",
       "openclaw_update_profile",
       "a2a_plaza_search",
@@ -71,6 +83,11 @@ describe("zero-config install (issue #7)", () => {
     assert.ok(registration.tools.has("openclaw_match_agent"), "openclaw_match_agent should be registered");
     assert.ok(registration.tools.has("openclaw_resolve_agent"), "openclaw_resolve_agent should be registered");
     assert.ok(registration.tools.has("openclaw_call_official_agent"), "openclaw_call_official_agent should be registered");
+    assert.ok(registration.tools.has("openclaw_room_create"), "openclaw_room_create should be registered");
+    assert.ok(registration.tools.has("openclaw_room_list"), "openclaw_room_list should be registered");
+    assert.ok(registration.tools.has("openclaw_room_post"), "openclaw_room_post should be registered");
+    assert.ok(registration.tools.has("openclaw_room_read"), "openclaw_room_read should be registered");
+    assert.ok(registration.tools.has("openclaw_room_summary"), "openclaw_room_summary should be registered");
     assert.ok(registration.tools.has("openclaw_plaza_search"), "openclaw_plaza_search should be registered");
     assert.ok(registration.tools.has("openclaw_update_profile"), "openclaw_update_profile should be registered");
     assert.ok(registration.tools.has("a2a_plaza_search"), "legacy a2a_plaza_search should remain registered");
@@ -180,6 +197,27 @@ describe("zero-config install (issue #7)", () => {
       auth: "bearer",
       metadata: { path: "/mcp" },
     });
+  });
+
+  it("parses shared context configuration with defaults and overrides", () => {
+    const config = parseConfig({
+      sharedContext: {
+        enabled: false,
+        storePath: "./shared.jsonl",
+        maxMessageChars: 1234,
+        maxMessagesPerRead: 12,
+        httpEnabled: false,
+        httpPath: "shared/jsonrpc",
+      },
+    }, (nextPath) => `resolved:${nextPath}`);
+
+    assert.equal(config.sharedContext.enabled, false);
+    assert.ok(config.sharedContext.storePath.includes("resolved:"), "custom resolver should be applied");
+    assert.ok(config.sharedContext.storePath.endsWith("shared.jsonl"), "storePath should resolve configured file name");
+    assert.equal(config.sharedContext.maxMessageChars, 1234);
+    assert.equal(config.sharedContext.maxMessagesPerRead, 12);
+    assert.equal(config.sharedContext.httpEnabled, false);
+    assert.equal(config.sharedContext.httpPath, "/shared/jsonrpc");
   });
 
   it("merges configured generic endpoints into the Hub connection descriptor", () => {

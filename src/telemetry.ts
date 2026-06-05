@@ -16,6 +16,7 @@ interface HttpMetrics {
   jsonrpc_requests: number;
   rest_requests: number;
   metrics_requests: number;
+  shared_context_requests: number;
   outbound_requests: number;
   security_rejections: number;
   last_request_at?: string;
@@ -70,6 +71,7 @@ export class GatewayTelemetry {
     jsonrpc_requests: 0,
     rest_requests: 0,
     metrics_requests: 0,
+    shared_context_requests: 0,
     outbound_requests: 0,
     security_rejections: 0,
   };
@@ -110,7 +112,7 @@ export class GatewayTelemetry {
     this.taskAuditCallback = callback;
   }
 
-  recordInboundHttp(route: "jsonrpc" | "rest" | "metrics", statusCode: number, durationMs: number): void {
+  recordInboundHttp(route: "jsonrpc" | "rest" | "metrics" | "shared_context", statusCode: number, durationMs: number): void {
     this.collector.recordReceive();
     this.http.requests_total += 1;
     this.http.last_request_at = new Date().toISOString();
@@ -119,8 +121,10 @@ export class GatewayTelemetry {
       this.http.jsonrpc_requests += 1;
     } else if (route === "rest") {
       this.http.rest_requests += 1;
-    } else {
+    } else if (route === "metrics") {
       this.http.metrics_requests += 1;
+    } else {
+      this.http.shared_context_requests += 1;
     }
 
     this.log("info", "http.request", {

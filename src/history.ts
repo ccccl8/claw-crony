@@ -26,6 +26,10 @@ export type RequestHistoryType =
   | "send_file.failed"
   | "official_agent.call_completed"
   | "official_agent.call_failed"
+  | "shared.room_created"
+  | "shared.room_archived"
+  | "shared.message_posted"
+  | "shared.artifact_attached"
   | "task.inbound_completed"
   | "task.inbound_failed";
 

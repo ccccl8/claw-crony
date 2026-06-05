@@ -27,6 +27,7 @@ import { FileTaskStore } from "./src/task-store.js";
 import { GatewayTelemetry } from "./src/telemetry.js";
 import { AuditLogger } from "./src/audit.js";
 import { RequestHistoryStore } from "./src/history.js";
+import { SharedContextStore, type SharedArtifactRef, type SharedMessageKind } from "./src/shared-context.js";
 import { PeerHealthManager } from "./src/peer-health.js";
 import { runHubRegistration } from "./src/hub-registration.js";
 import { HubMatchClient, type HubHandshakeMessage, type HubMatchResult } from "./src/hub-match.js";
@@ -62,6 +63,15 @@ import {
 /** Build a JSON-RPC error response. */
 function jsonRpcError(id: string | number | null, code: number, message: string) {
   return { jsonrpc: "2.0" as const, id, error: { code, message } };
+}
+
+/** Build a JSON-RPC success response. */
+function jsonRpcResult(id: string | number | null, result: unknown) {
+  return { jsonrpc: "2.0" as const, id, result };
+}
+
+function formatErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function asObject(value: unknown): Record<string, unknown> {
@@ -125,6 +135,49 @@ function asMetadata(value: unknown): Record<string, unknown> | undefined {
 
   const metadata = value as Record<string, unknown>;
   return Object.keys(metadata).length > 0 ? metadata : undefined;
+}
+
+const SHARED_MESSAGE_KINDS = new Set<SharedMessageKind>([
+  "text",
+  "markdown",
+  "code",
+  "diff",
+  "status_update",
+  "summary",
+  "question",
+  "decision",
+  "blocker",
+  "artifact_ref",
+]);
+
+type SharedArtifactInput = Omit<SharedArtifactRef, "id" | "roomId" | "messageId" | "createdAt" | "createdBy">;
+
+function asOptionalString(value: unknown): string | undefined {
+  const text = asString(value, "").trim();
+  return text || undefined;
+}
+
+function asSharedMessageKind(value: unknown): SharedMessageKind | undefined {
+  const kind = asString(value, "").trim();
+  return SHARED_MESSAGE_KINDS.has(kind as SharedMessageKind) ? kind as SharedMessageKind : undefined;
+}
+
+function asSharedArtifactInputs(value: unknown): SharedArtifactInput[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  return value.map((entry) => {
+    const payload = asObject(entry);
+    return {
+      kind: asString(payload.kind, ""),
+      name: asOptionalString(payload.name),
+      uri: asOptionalString(payload.uri),
+      mimeType: asOptionalString(payload.mimeType),
+      digest: asOptionalString(payload.digest),
+      metadata: asMetadata(payload.metadata),
+    };
+  });
 }
 
 function normalizeHttpPath(value: string, fallback: string): string {
@@ -255,6 +308,7 @@ export function parseConfig(raw: unknown, resolvePath?: (nextPath: string) => st
   const registration = asObject(config.registration);
   const profile = asObject(config.profile);
   const connection = asObject(config.connection);
+  const sharedContext = asObject(config.sharedContext);
 
   const inboundAuth = asString(security.inboundAuth, "none") as InboundAuth;
 
@@ -329,6 +383,21 @@ export function parseConfig(raw: unknown, resolvePath?: (nextPath: string) => st
         resolvePath,
       ),
       historyIncludeEncryptedPayloads: asBoolean(observability.historyIncludeEncryptedPayloads, false),
+    },
+    sharedContext: {
+      enabled: asBoolean(sharedContext.enabled, true),
+      storePath: resolveConfiguredPath(
+        sharedContext.storePath,
+        path.join(os.homedir(), ".openclaw", "claw-crony-shared-context.jsonl"),
+        resolvePath,
+      ),
+      maxMessageChars: Math.max(1, Math.floor(asNumber(sharedContext.maxMessageChars, 20_000))),
+      maxMessagesPerRead: Math.max(1, Math.floor(asNumber(sharedContext.maxMessagesPerRead, 100))),
+      httpEnabled: asBoolean(sharedContext.httpEnabled, true),
+      httpPath: normalizeHttpPath(
+        asString(sharedContext.httpPath, "/openclaw/shared-context/jsonrpc"),
+        "/openclaw/shared-context/jsonrpc",
+      ),
     },
     timeouts: {
       agentResponseTimeoutMs: asNumber(timeouts.agentResponseTimeoutMs, 300_000),
@@ -613,6 +682,11 @@ const plugin = {
       enabled: config.observability.historyEnabled,
       includeEncryptedPayloads: config.observability.historyIncludeEncryptedPayloads,
     });
+    const sharedContextStore = new SharedContextStore(config.sharedContext.storePath, {
+      enabled: config.sharedContext.enabled,
+      maxMessageChars: config.sharedContext.maxMessageChars,
+      maxMessagesPerRead: config.sharedContext.maxMessagesPerRead,
+    });
     const client = new A2AClient();
     const taskStore = new FileTaskStore(config.storage.tasksDir);
     const executor = new QueueingAgentExecutor(
@@ -688,7 +762,7 @@ const plugin = {
 
     const app = express();
     const createHttpMetricsMiddleware =
-      (route: "jsonrpc" | "rest" | "metrics") =>
+      (route: "jsonrpc" | "rest" | "metrics" | "shared_context") =>
       (_req: express.Request, res: express.Response, next: express.NextFunction) => {
         const startedAt = Date.now();
         res.on("finish", () => {
@@ -1166,6 +1240,218 @@ const plugin = {
       respond: (ok: boolean, data: unknown) => void;
     };
 
+    type SharedContextMethodResult = {
+      ok: boolean;
+      data: unknown;
+    };
+
+    const SHARED_CONTEXT_METHODS = new Set([
+      "openclaw.room.create",
+      "openclaw.room.list",
+      "openclaw.room.post",
+      "openclaw.room.read",
+      "openclaw.room.archive",
+      "openclaw.room.summary",
+      "openclaw.artifact.attach",
+    ]);
+
+    const executeSharedContextMethod = async (method: string, params: unknown): Promise<SharedContextMethodResult> => {
+      const payload = asObject(params);
+      try {
+        if (method === "openclaw.room.create") {
+          const room = await sharedContextStore.createRoom({
+            title: asString(payload.title, ""),
+            topic: asString(payload.topic, ""),
+            participants: asStringArray(payload.participants),
+            tags: asStringArray(payload.tags),
+            createdBy: asString(payload.createdBy ?? payload.author, ""),
+            metadata: asMetadata(payload.metadata),
+          });
+          historyStore.record({
+            type: "shared.room_created",
+            status: "success",
+            direction: "local",
+            detail: { roomId: room.id, title: room.title, participants: room.participants },
+          });
+          return { ok: true, data: { room } };
+        }
+
+        if (method === "openclaw.room.list") {
+          const status = asString(payload.status, "");
+          const rooms = await sharedContextStore.listRooms({
+            count: asNumber(payload.count ?? payload.limit, 50),
+            participant: asString(payload.participant, ""),
+            status: status === "archived" ? "archived" : status === "open" ? "open" : undefined,
+            tag: asString(payload.tag, ""),
+          });
+          return { ok: true, data: { rooms, count: rooms.length } };
+        }
+
+        if (method === "openclaw.room.post") {
+          const message = await sharedContextStore.postMessage({
+            roomId: asString(payload.roomId, ""),
+            author: asString(payload.author, ""),
+            content: asString(payload.content ?? payload.text ?? payload.message, ""),
+            kind: asSharedMessageKind(payload.kind),
+            artifacts: asSharedArtifactInputs(payload.artifacts),
+            metadata: asMetadata(payload.metadata),
+          });
+          historyStore.record({
+            type: "shared.message_posted",
+            status: "success",
+            direction: "local",
+            peer: message.author,
+            detail: { roomId: message.roomId, messageId: message.id, kind: message.kind },
+          });
+          return { ok: true, data: { message } };
+        }
+
+        if (method === "openclaw.room.read") {
+          const messages = await sharedContextStore.readMessages(asString(payload.roomId, ""), {
+            count: asNumber(payload.count ?? payload.limit, 50),
+            after: asString(payload.after, ""),
+          });
+          return { ok: true, data: { messages, count: messages.length } };
+        }
+
+        if (method === "openclaw.room.archive") {
+          const room = await sharedContextStore.archiveRoom(asString(payload.roomId, ""));
+          historyStore.record({
+            type: "shared.room_archived",
+            status: "success",
+            direction: "local",
+            detail: { roomId: room.id, title: room.title },
+          });
+          return { ok: true, data: { room } };
+        }
+
+        if (method === "openclaw.room.summary") {
+          const summary = await sharedContextStore.summarizeRoom(
+            asString(payload.roomId, ""),
+            asNumber(payload.count ?? payload.limit, 20),
+          );
+          return { ok: true, data: { summary } };
+        }
+
+        if (method === "openclaw.artifact.attach") {
+          const artifact = await sharedContextStore.attachArtifact({
+            roomId: asString(payload.roomId, ""),
+            messageId: asString(payload.messageId, ""),
+            createdBy: asString(payload.createdBy ?? payload.author, ""),
+            kind: asString(payload.kind, ""),
+            name: asString(payload.name, ""),
+            uri: asString(payload.uri, ""),
+            mimeType: asString(payload.mimeType, ""),
+            digest: asString(payload.digest, ""),
+            metadata: asMetadata(payload.metadata),
+          });
+          historyStore.record({
+            type: "shared.artifact_attached",
+            status: "success",
+            direction: "local",
+            peer: artifact.createdBy,
+            detail: { roomId: artifact.roomId, artifactId: artifact.id, kind: artifact.kind },
+          });
+          return { ok: true, data: { artifact } };
+        }
+
+        return { ok: false, data: { error: `unsupported shared context method: ${method}`, code: -32601 } };
+      } catch (error) {
+        return { ok: false, data: { error: formatErrorMessage(error) } };
+      }
+    };
+
+    const createSharedGatewayHandler = (method: string) => ({ params, respond }: GatewayMethodArgs) => {
+      executeSharedContextMethod(method, params)
+        .then((result) => respond(result.ok, result.data))
+        .catch((error) => respond(false, { error: formatErrorMessage(error) }));
+    };
+
+    api.registerGatewayMethod("openclaw.room.create", createSharedGatewayHandler("openclaw.room.create"));
+    api.registerGatewayMethod("openclaw.room.list", createSharedGatewayHandler("openclaw.room.list"));
+    api.registerGatewayMethod("openclaw.room.post", createSharedGatewayHandler("openclaw.room.post"));
+    api.registerGatewayMethod("openclaw.room.read", createSharedGatewayHandler("openclaw.room.read"));
+    api.registerGatewayMethod("openclaw.room.archive", createSharedGatewayHandler("openclaw.room.archive"));
+    api.registerGatewayMethod("openclaw.room.summary", createSharedGatewayHandler("openclaw.room.summary"));
+    api.registerGatewayMethod("openclaw.artifact.attach", createSharedGatewayHandler("openclaw.artifact.attach"));
+
+    const jsonRpcRequestId = (value: unknown): string | number | null => {
+      if (typeof value === "string" || typeof value === "number" || value === null) {
+        return value;
+      }
+      return null;
+    };
+
+    const handleSharedContextJsonRpcCall = async (call: unknown) => {
+      const request = asObject(call);
+      const id = jsonRpcRequestId(request.id);
+      const method = asString(request.method, "");
+      if (request.jsonrpc !== "2.0" || !method) {
+        return jsonRpcError(id, -32600, "Invalid Request");
+      }
+      if (!SHARED_CONTEXT_METHODS.has(method)) {
+        return jsonRpcError(id, -32601, "Method not found");
+      }
+
+      const result = await executeSharedContextMethod(method, request.params ?? {});
+      if (result.ok) {
+        return jsonRpcResult(id, result.data);
+      }
+
+      const errorPayload = asObject(result.data);
+      return jsonRpcError(id, asNumber(errorPayload.code, -32000), asString(errorPayload.error, "Shared context error"));
+    };
+
+    if (config.sharedContext.httpEnabled) {
+      app.post(
+        config.sharedContext.httpPath,
+        createHttpMetricsMiddleware("shared_context"),
+        express.json({ limit: Math.max(1_048_576, config.sharedContext.maxMessageChars * 4) }),
+        (req, res, next) => {
+          if (config.security.inboundAuth === "bearer" && config.security.validTokens.size > 0) {
+            const authHeader = req.headers.authorization;
+            const header = Array.isArray(authHeader) ? authHeader[0] : authHeader;
+            const token = typeof header === "string" && header.startsWith("Bearer ") ? header.slice(7) : "";
+            if (!token || !config.security.validTokens.has(token)) {
+              telemetry.recordSecurityRejection("http", "invalid or missing bearer token");
+              auditLogger.recordSecurityEvent("http", "invalid or missing bearer token");
+              res.status(401).json(jsonRpcError(null, -32000, "Unauthorized: invalid or missing bearer token"));
+              return;
+            }
+          }
+          next();
+        },
+        async (req, res) => {
+          try {
+            if (Array.isArray(req.body)) {
+              if (req.body.length === 0) {
+                res.status(400).json(jsonRpcError(null, -32600, "Invalid Request"));
+                return;
+              }
+              res.json(await Promise.all(req.body.map((entry) => handleSharedContextJsonRpcCall(entry))));
+              return;
+            }
+
+            res.json(await handleSharedContextJsonRpcCall(req.body));
+          } catch (error) {
+            res.status(500).json(jsonRpcError(null, -32603, formatErrorMessage(error)));
+          }
+        },
+      );
+
+      app.use(config.sharedContext.httpPath, (err: unknown, _req: express.Request, res: express.Response, next: express.NextFunction) => {
+        if (!err) {
+          next();
+          return;
+        }
+        if (err instanceof SyntaxError || (err as { type?: string }).type === "entity.parse.failed") {
+          res.status(400).json(jsonRpcError(null, -32700, "Parse error"));
+          return;
+        }
+        res.status(500).json(jsonRpcError(null, -32603, "Internal error"));
+      });
+    }
+
     const handlePlazaList = ({ params, respond }: GatewayMethodArgs) => {
       const payload = asObject(params);
       let profileClient: HubProfileClient;
@@ -1442,6 +1728,190 @@ const plugin = {
     // Lets the agent send a file (by URI) to a peer via A2A FilePart.
     // ------------------------------------------------------------------
     if (api.registerTool) {
+      const roomCreateParameters = {
+        type: "object" as const,
+        required: ["title"],
+        properties: {
+          title: { type: "string" as const, description: "Shared room title" },
+          topic: { type: "string" as const, description: "Optional room topic or purpose" },
+          participants: { type: "array" as const, items: { type: "string" as const }, description: "Optional known participants" },
+          tags: { type: "array" as const, items: { type: "string" as const }, description: "Optional room tags" },
+          createdBy: { type: "string" as const, description: "Agent or user creating the room" },
+        },
+      };
+
+      api.registerTool({
+        name: "openclaw_room_create",
+        description: "Create a lightweight shared information room. Use this to set up a neutral place for agents to exchange progress, summaries, questions, decisions, blockers, code snippets, or artifact references.",
+        label: "OpenClaw Room Create",
+        parameters: roomCreateParameters,
+        async execute(toolCallId, params) {
+          const payload = asObject(params);
+          try {
+            const room = await sharedContextStore.createRoom({
+              title: asString(payload.title, ""),
+              topic: asString(payload.topic, ""),
+              participants: asStringArray(payload.participants),
+              tags: asStringArray(payload.tags),
+              createdBy: asString(payload.createdBy ?? payload.author, ""),
+              metadata: asMetadata(payload.metadata),
+            });
+            historyStore.record({
+              type: "shared.room_created",
+              status: "success",
+              direction: "local",
+              detail: { roomId: room.id, title: room.title },
+            });
+            return {
+              content: [{ type: "text" as const, text: `Shared room created: ${room.id}\nTitle: ${room.title}` }],
+              details: { ok: true, room },
+            };
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            return { content: [{ type: "text" as const, text: `Failed to create shared room: ${msg}` }], details: { ok: false, error: msg } };
+          }
+        },
+      });
+
+      api.registerTool({
+        name: "openclaw_room_list",
+        description: "List shared information rooms by status, participant, tag, or count. Use this to find an existing synchronization room before creating a new one.",
+        label: "OpenClaw Room List",
+        parameters: {
+          type: "object" as const,
+          properties: {
+            status: { type: "string" as const, description: "Optional room status: open or archived" },
+            participant: { type: "string" as const, description: "Optional participant filter" },
+            tag: { type: "string" as const, description: "Optional tag filter" },
+            count: { type: "number" as const, description: "Maximum number of rooms to return" },
+          },
+        },
+        async execute(toolCallId, params) {
+          const payload = asObject(params);
+          const status = asString(payload.status, "");
+          try {
+            const rooms = await sharedContextStore.listRooms({
+              count: asNumber(payload.count ?? payload.limit, 50),
+              participant: asString(payload.participant, ""),
+              status: status === "archived" ? "archived" : status === "open" ? "open" : undefined,
+              tag: asString(payload.tag, ""),
+            });
+            const text = rooms.map((room) => (
+              `${room.id} [${room.status}] ${room.title}${room.topic ? ` - ${room.topic}` : ""}`
+            )).join("\n") || "No shared rooms found.";
+            return { content: [{ type: "text" as const, text }], details: { ok: true, rooms, count: rooms.length } };
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            return { content: [{ type: "text" as const, text: `Failed to list shared rooms: ${msg}` }], details: { ok: false, error: msg } };
+          }
+        },
+      });
+
+      api.registerTool({
+        name: "openclaw_room_post",
+        description: "Post text, markdown, code, diff, status_update, summary, question, decision, blocker, or artifact_ref information into a shared room. This only exchanges information; it does not command another agent to act.",
+        label: "OpenClaw Room Post",
+        parameters: {
+          type: "object" as const,
+          required: ["roomId", "author", "content"],
+          properties: {
+            roomId: { type: "string" as const, description: "Shared room id" },
+            author: { type: "string" as const, description: "Agent or user posting this message" },
+            kind: { type: "string" as const, description: "Message kind: text, markdown, code, diff, status_update, summary, question, decision, blocker, artifact_ref" },
+            content: { type: "string" as const, description: "Message content" },
+          },
+        },
+        async execute(toolCallId, params) {
+          const payload = asObject(params);
+          try {
+            const message = await sharedContextStore.postMessage({
+              roomId: asString(payload.roomId, ""),
+              author: asString(payload.author, ""),
+              content: asString(payload.content ?? payload.text ?? payload.message, ""),
+              kind: asSharedMessageKind(payload.kind),
+              metadata: asMetadata(payload.metadata),
+            });
+            historyStore.record({
+              type: "shared.message_posted",
+              status: "success",
+              direction: "local",
+              peer: message.author,
+              detail: { roomId: message.roomId, messageId: message.id, kind: message.kind },
+            });
+            return {
+              content: [{ type: "text" as const, text: `Message posted to ${message.roomId}: ${message.id}` }],
+              details: { ok: true, message },
+            };
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            return { content: [{ type: "text" as const, text: `Failed to post shared room message: ${msg}` }], details: { ok: false, error: msg } };
+          }
+        },
+      });
+
+      api.registerTool({
+        name: "openclaw_room_read",
+        description: "Read recent messages from a shared room. Use this to synchronize with other agents' progress, decisions, blockers, summaries, and artifacts.",
+        label: "OpenClaw Room Read",
+        parameters: {
+          type: "object" as const,
+          required: ["roomId"],
+          properties: {
+            roomId: { type: "string" as const, description: "Shared room id" },
+            count: { type: "number" as const, description: "Maximum number of recent messages to read" },
+            after: { type: "string" as const, description: "Optional ISO timestamp; only return newer messages" },
+          },
+        },
+        async execute(toolCallId, params) {
+          const payload = asObject(params);
+          try {
+            const messages = await sharedContextStore.readMessages(asString(payload.roomId, ""), {
+              count: asNumber(payload.count ?? payload.limit, 50),
+              after: asString(payload.after, ""),
+            });
+            const text = messages.map((message) => (
+              `[${message.ts}] ${message.author} ${message.kind}: ${message.content}`
+            )).join("\n\n") || "No messages found.";
+            return { content: [{ type: "text" as const, text }], details: { ok: true, messages, count: messages.length } };
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            return { content: [{ type: "text" as const, text: `Failed to read shared room: ${msg}` }], details: { ok: false, error: msg } };
+          }
+        },
+      });
+
+      api.registerTool({
+        name: "openclaw_room_summary",
+        description: "Return a structured local summary of a shared room: participants, recent messages, blockers, decisions, and artifact counts. This does not ask another agent to act.",
+        label: "OpenClaw Room Summary",
+        parameters: {
+          type: "object" as const,
+          required: ["roomId"],
+          properties: {
+            roomId: { type: "string" as const, description: "Shared room id" },
+            count: { type: "number" as const, description: "Number of recent messages to include" },
+          },
+        },
+        async execute(toolCallId, params) {
+          const payload = asObject(params);
+          try {
+            const summary = await sharedContextStore.summarizeRoom(asString(payload.roomId, ""), asNumber(payload.count ?? payload.limit, 20));
+            const text = [
+              `Room: ${summary.room.title} (${summary.room.id})`,
+              `Participants: ${summary.participants.join(", ") || "(none)"}`,
+              `Messages: ${summary.messageCount}; Artifacts: ${summary.artifactCount}`,
+              `Recent: ${summary.recent.length}`,
+              `Blockers: ${summary.blockers.map((message) => message.content).join(" | ") || "(none)"}`,
+              `Decisions: ${summary.decisions.map((message) => message.content).join(" | ") || "(none)"}`,
+            ].join("\n");
+            return { content: [{ type: "text" as const, text }], details: { ok: true, summary } };
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            return { content: [{ type: "text" as const, text: `Failed to summarize shared room: ${msg}` }], details: { ok: false, error: msg } };
+          }
+        },
+      });
+
       const sendFileParams = {
         type: "object" as const,
         required: ["peer", "uri"],
@@ -2044,6 +2514,7 @@ const plugin = {
         healthManager?.stop();
         auditLogger.close();
         historyStore.close();
+        sharedContextStore.close();
 
         await stopHubLifecycle("service");
 

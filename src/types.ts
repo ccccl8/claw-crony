@@ -102,6 +102,7 @@ export interface GatewayConfig {
     historyLogPath: string;
     historyIncludeEncryptedPayloads: boolean;
   };
+  sharedContext: SharedContextConfig;
   timeouts?: {
     /**
      * Max time to wait for the underlying OpenClaw agent run to finish (Gateway RPC `agent`).
@@ -114,6 +115,19 @@ export interface GatewayConfig {
   registration?: RegistrationConfig;
   profile: ProfileConfig;
   connection: ConnectionConfig;
+}
+
+// ---------------------------------------------------------------------------
+// Shared context configuration
+// ---------------------------------------------------------------------------
+
+export interface SharedContextConfig {
+  enabled: boolean;
+  storePath: string;
+  maxMessageChars: number;
+  maxMessagesPerRead: number;
+  httpEnabled: boolean;
+  httpPath: string;
 }
 
 // ---------------------------------------------------------------------------

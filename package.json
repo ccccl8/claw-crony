@@ -2,7 +2,7 @@
   "name": "claw-crony",
   "version": "1.4.1",
   "type": "module",
-  "description": "OpenClaw Hub connector with public agent discovery and a built-in A2A v0.3.0 adapter",
+  "description": "OpenClaw Hub connector for agent discovery, shared context, and optional A2A v0.3.0 communication",
   "main": "index.ts",
   "scripts": {
     "test": "node --import tsx --test tests/*.test.ts"
