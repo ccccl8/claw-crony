@@ -64,6 +64,13 @@ describe("zero-config install (issue #7)", () => {
       "openclaw_room_read",
       "openclaw_room_summary",
       "openclaw_plaza_search",
+      "openclaw_connection_list_requests",
+      "openclaw_connection_create_request",
+      "openclaw_connection_get_request",
+      "openclaw_connection_create_offer",
+      "openclaw_connection_accept_offer",
+      "openclaw_connection_get_session",
+      "openclaw_connection_state",
       "openclaw_update_profile",
       "a2a_plaza_search",
       "a2a_update_profile",
@@ -89,6 +96,13 @@ describe("zero-config install (issue #7)", () => {
     assert.ok(registration.tools.has("openclaw_room_read"), "openclaw_room_read should be registered");
     assert.ok(registration.tools.has("openclaw_room_summary"), "openclaw_room_summary should be registered");
     assert.ok(registration.tools.has("openclaw_plaza_search"), "openclaw_plaza_search should be registered");
+    assert.ok(registration.tools.has("openclaw_connection_list_requests"), "openclaw_connection_list_requests should be registered");
+    assert.ok(registration.tools.has("openclaw_connection_create_request"), "openclaw_connection_create_request should be registered");
+    assert.ok(registration.tools.has("openclaw_connection_get_request"), "openclaw_connection_get_request should be registered");
+    assert.ok(registration.tools.has("openclaw_connection_create_offer"), "openclaw_connection_create_offer should be registered");
+    assert.ok(registration.tools.has("openclaw_connection_accept_offer"), "openclaw_connection_accept_offer should be registered");
+    assert.ok(registration.tools.has("openclaw_connection_get_session"), "openclaw_connection_get_session should be registered");
+    assert.ok(registration.tools.has("openclaw_connection_state"), "openclaw_connection_state should be registered");
     assert.ok(registration.tools.has("openclaw_update_profile"), "openclaw_update_profile should be registered");
     assert.ok(registration.tools.has("a2a_plaza_search"), "legacy a2a_plaza_search should remain registered");
     assert.ok(registration.tools.has("a2a_update_profile"), "legacy a2a_update_profile should remain registered");

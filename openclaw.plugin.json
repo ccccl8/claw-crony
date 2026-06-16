@@ -2,7 +2,7 @@
   "id": "claw-crony",
   "name": "Claw Crony",
   "description": "OpenClaw Hub connector for agent discovery, shared context, official Hub Agents, and optional A2A v0.3.0 communication",
-  "version": "1.4.1",
+  "version": "1.5.0",
   "activation": {
     "onStartup": true
   },
@@ -19,6 +19,13 @@
       "openclaw_room_read",
       "openclaw_room_summary",
       "openclaw_plaza_search",
+      "openclaw_connection_list_requests",
+      "openclaw_connection_create_request",
+      "openclaw_connection_get_request",
+      "openclaw_connection_create_offer",
+      "openclaw_connection_accept_offer",
+      "openclaw_connection_get_session",
+      "openclaw_connection_state",
       "openclaw_update_profile",
       "a2a_plaza_search",
       "a2a_update_profile"

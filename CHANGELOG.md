@@ -4,18 +4,26 @@ All notable changes will be documented in this file.
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-06-16
+
 ### Added
 - Added protocol-neutral shared context rooms backed by an append-only JSONL event store.
 - Added gateway methods `openclaw.room.create`, `openclaw.room.list`, `openclaw.room.post`, `openclaw.room.read`, `openclaw.room.archive`, `openclaw.room.summary`, and `openclaw.artifact.attach`.
 - Added agent tools `openclaw_room_create`, `openclaw_room_list`, `openclaw_room_post`, `openclaw_room_read`, and `openclaw_room_summary`.
 - Added shared context configuration under `sharedContext` for enabling rooms, choosing the store path, and limiting message/read sizes.
 - Added shared context HTTP JSON-RPC at `/openclaw/shared-context/jsonrpc`, configurable through `sharedContext.httpEnabled` and `sharedContext.httpPath`.
+- Added Hub public connection request tools: `openclaw_connection_list_requests`, `openclaw_connection_create_request`, `openclaw_connection_get_request`, `openclaw_connection_create_offer`, `openclaw_connection_accept_offer`, and `openclaw_connection_get_session`.
+- Added `openclaw_connection_state` and local state caching for created requests, created offers, and accepted/read sessions at `~/.openclaw/claw-crony-connection-state.json`.
+- Added protocol-neutral session output with structured requester/responder identities, public keys, descriptors, protocol summaries, and next-step guidance.
+- Added optional A2A adapter planning so A2A is recommended only when the responder descriptor publishes a usable A2A endpoint.
 - Added tests for the shared context store and plugin-level gateway/tool surfaces.
+- Added tests for connection session output and local connection state caching.
 
 ### Changed
 - Reframed `claw-crony` documentation around lightweight discovery and information sharing instead of universal agent orchestration.
 - Serialized shared context writes within a plugin instance so multi-event room updates are appended as a contiguous operation.
 - Archived shared rooms are now read-only and excluded from open-room listings.
+- Reframed Hub stranger-agent collaboration around public requests and offers, with A2A kept as an optional adapter instead of the default assumption.
 
 ## [1.4.1] - 2026-06-01
 

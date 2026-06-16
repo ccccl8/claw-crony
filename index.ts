@@ -32,6 +32,14 @@ import { PeerHealthManager } from "./src/peer-health.js";
 import { runHubRegistration } from "./src/hub-registration.js";
 import { HubMatchClient, type HubHandshakeMessage, type HubMatchResult } from "./src/hub-match.js";
 import { HubProfileClient, syncHubProfile, type HubProfileUpdate } from "./src/hub-profile.js";
+import {
+  HubConnectionRequestClient,
+  buildConnectionSessionView,
+  formatConnectionOffers,
+  formatConnectionRequests,
+  formatConnectionSession,
+} from "./src/hub-connection-requests.js";
+import { ConnectionStateStore, formatConnectionState } from "./src/connection-state.js";
 import { performGenericHubMatch, resolveHubPeer } from "./src/hub-discovery.js";
 import { callOfficialAgentAction } from "./src/official-agent-call.js";
 import { normalizeAgentCardSkills } from "./src/skill-catalog.js";
@@ -687,6 +695,14 @@ const plugin = {
       maxMessageChars: config.sharedContext.maxMessageChars,
       maxMessagesPerRead: config.sharedContext.maxMessagesPerRead,
     });
+    const connectionStateStore = new ConnectionStateStore();
+    const safeRecordConnectionState = (record: () => void) => {
+      try {
+        record();
+      } catch (err) {
+        api.logger.warn(`claw-crony: failed to update connection state - ${err instanceof Error ? err.message : String(err)}`);
+      }
+    };
     const client = new A2AClient();
     const taskStore = new FileTaskStore(config.storage.tasksDir);
     const executor = new QueueingAgentExecutor(
@@ -2318,6 +2334,356 @@ const plugin = {
         "A2A Plaza Search",
         "Compatibility alias for openclaw_plaza_search.",
       );
+
+      const connectionRequestListParameters = {
+        type: "object" as const,
+        properties: {
+          q: {
+            type: "string" as const,
+            description: "Optional keyword to search request titles, summaries, details, or requester names",
+          },
+          skill: {
+            type: "string" as const,
+            description: "Optional skill filter such as chat, code_review, data_analysis",
+          },
+          requestType: {
+            type: "string" as const,
+            description: "Optional request type: task, question, collaboration, debug, experiment, or other",
+          },
+          limit: {
+            type: "number" as const,
+            description: "Maximum number of open requests to return",
+          },
+        },
+      };
+
+      api.registerTool({
+        name: "openclaw_connection_list_requests",
+        description: "List open Hub connection requests from the public plaza. Use this to find stranger-agent collaboration opportunities.",
+        label: "OpenClaw List Connection Requests",
+        parameters: connectionRequestListParameters,
+        async execute(toolCallId, params) {
+          const input = asObject(params);
+          try {
+            const client = HubConnectionRequestClient.createFromRegistration();
+            const requests = await client.listRequests({
+              q: asString(input.q, ""),
+              skill: asString(input.skill, ""),
+              requestType: asString(input.requestType, ""),
+              limit: asPositiveInteger(input.limit) ?? undefined,
+            });
+            return {
+              content: [{ type: "text" as const, text: formatConnectionRequests(requests) }],
+              details: { ok: true, count: requests.length, requests },
+            };
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            return {
+              content: [{ type: "text" as const, text: `Failed to list Hub connection requests: ${msg}` }],
+              details: { ok: false, error: msg },
+            };
+          }
+        },
+      });
+
+      api.registerTool({
+        name: "openclaw_connection_create_request",
+        description: "Publish a Hub connection request using this local agent identity. Other public agents can respond with offers.",
+        label: "OpenClaw Create Connection Request",
+        parameters: {
+          type: "object" as const,
+          required: ["title", "summary"],
+          properties: {
+            title: {
+              type: "string" as const,
+              description: "Short request title, up to 120 characters",
+            },
+            summary: {
+              type: "string" as const,
+              description: "Brief public request summary, up to 280 characters",
+            },
+            details: {
+              type: "string" as const,
+              description: "Optional longer details, up to 2000 characters",
+            },
+            requestType: {
+              type: "string" as const,
+              description: "task, question, collaboration, debug, experiment, or other",
+            },
+            requiredSkills: {
+              type: "array" as const,
+              items: { type: "string" as const },
+              description: "Skills requested from responder agents",
+            },
+            collaborationMode: {
+              type: "string" as const,
+              description: "any, async, realtime, manual, or automated",
+            },
+            inputModes: {
+              type: "array" as const,
+              items: { type: "string" as const },
+              description: "Optional input modes expected by the task",
+            },
+            outputModes: {
+              type: "array" as const,
+              items: { type: "string" as const },
+              description: "Optional output modes expected by the task",
+            },
+            connectionHint: {
+              type: "object" as const,
+              description: "Optional structured connection preference or constraints",
+            },
+          },
+        },
+        async execute(toolCallId, params) {
+          const input = asObject(params);
+          try {
+            const client = HubConnectionRequestClient.createFromRegistration();
+            const request = await client.createRequest({
+              title: asString(input.title, ""),
+              summary: asString(input.summary, ""),
+              details: asString(input.details, ""),
+              requestType: asString(input.requestType, ""),
+              requiredSkills: asStringArray(input.requiredSkills ?? input.skills),
+              collaborationMode: asString(input.collaborationMode, ""),
+              inputModes: asStringArray(input.inputModes),
+              outputModes: asStringArray(input.outputModes),
+              connectionHint: asMetadata(input.connectionHint),
+            });
+            safeRecordConnectionState(() => connectionStateStore.recordRequest(request));
+            return {
+              content: [{
+                type: "text" as const,
+                text: `Hub connection request published: #${request.id} ${request.title}\nStatus: ${request.status}\nModeration: ${request.moderationStatus ?? "unknown"}`,
+              }],
+              details: { ok: true, request, statePath: connectionStateStore.path },
+            };
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            return {
+              content: [{ type: "text" as const, text: `Failed to create Hub connection request: ${msg}` }],
+              details: { ok: false, error: msg },
+            };
+          }
+        },
+      });
+
+      api.registerTool({
+        name: "openclaw_connection_get_request",
+        description: "Get a Hub connection request and its public offers.",
+        label: "OpenClaw Get Connection Request",
+        parameters: {
+          type: "object" as const,
+          required: ["requestId"],
+          properties: {
+            requestId: {
+              type: "number" as const,
+              description: "Hub connection request id",
+            },
+          },
+        },
+        async execute(toolCallId, params) {
+          const input = asObject(params);
+          const requestId = asPositiveInteger(input.requestId);
+          if (!requestId) {
+            return {
+              content: [{ type: "text" as const, text: "requestId must be a positive integer" }],
+              details: { ok: false, error: "request_id_required" },
+            };
+          }
+          try {
+            const client = HubConnectionRequestClient.createFromRegistration();
+            const [request, offers] = await Promise.all([
+              client.getRequest(requestId),
+              client.listOffers(requestId),
+            ]);
+            const text = [
+              formatConnectionRequests([request]),
+              "",
+              "Offers:",
+              formatConnectionOffers(offers),
+            ].join("\n");
+            return {
+              content: [{ type: "text" as const, text }],
+              details: { ok: true, request, offers },
+            };
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            return {
+              content: [{ type: "text" as const, text: `Failed to get Hub connection request: ${msg}` }],
+              details: { ok: false, error: msg },
+            };
+          }
+        },
+      });
+
+      api.registerTool({
+        name: "openclaw_connection_create_offer",
+        description: "Respond to a public Hub connection request with this local agent's connection descriptor.",
+        label: "OpenClaw Create Connection Offer",
+        parameters: {
+          type: "object" as const,
+          required: ["requestId", "message"],
+          properties: {
+            requestId: {
+              type: "number" as const,
+              description: "Hub connection request id",
+            },
+            message: {
+              type: "string" as const,
+              description: "Short public response message, up to 500 characters",
+            },
+            skills: {
+              type: "array" as const,
+              items: { type: "string" as const },
+              description: "Optional skills this local agent offers for the request",
+            },
+            collaborationMode: {
+              type: "string" as const,
+              description: "any, async, realtime, manual, or automated",
+            },
+          },
+        },
+        async execute(toolCallId, params) {
+          const input = asObject(params);
+          const requestId = asPositiveInteger(input.requestId);
+          if (!requestId) {
+            return {
+              content: [{ type: "text" as const, text: "requestId must be a positive integer" }],
+              details: { ok: false, error: "request_id_required" },
+            };
+          }
+          try {
+            const client = HubConnectionRequestClient.createFromRegistration();
+            const offer = await client.createOffer(requestId, {
+              message: asString(input.message, ""),
+              skills: asStringArray(input.skills),
+              collaborationMode: asString(input.collaborationMode, ""),
+            });
+            safeRecordConnectionState(() => connectionStateStore.recordOffer(offer));
+            return {
+              content: [{
+                type: "text" as const,
+                text: `Hub connection offer submitted: offer #${offer.id} for request #${offer.requestId}\nStatus: ${offer.status}\nModeration: ${offer.moderationStatus ?? "unknown"}`,
+              }],
+              details: { ok: true, offer, statePath: connectionStateStore.path },
+            };
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            return {
+              content: [{ type: "text" as const, text: `Failed to create Hub connection offer: ${msg}` }],
+              details: { ok: false, error: msg },
+            };
+          }
+        },
+      });
+
+      api.registerTool({
+        name: "openclaw_connection_accept_offer",
+        description: "Accept an offer on a request created by this local agent, producing a protocol-neutral connection session.",
+        label: "OpenClaw Accept Connection Offer",
+        parameters: {
+          type: "object" as const,
+          required: ["offerId"],
+          properties: {
+            offerId: {
+              type: "number" as const,
+              description: "Hub connection offer id to accept",
+            },
+            sharedContextRoomId: {
+              type: "string" as const,
+              description: "Optional shared context room id to include in the accepted session",
+            },
+          },
+        },
+        async execute(toolCallId, params) {
+          const input = asObject(params);
+          const offerId = asPositiveInteger(input.offerId);
+          if (!offerId) {
+            return {
+              content: [{ type: "text" as const, text: "offerId must be a positive integer" }],
+              details: { ok: false, error: "offer_id_required" },
+            };
+          }
+          try {
+            const client = HubConnectionRequestClient.createFromRegistration();
+            const session = await client.acceptOffer(offerId, {
+              sharedContextRoomId: asString(input.sharedContextRoomId, ""),
+            });
+            const connection = buildConnectionSessionView(session);
+            safeRecordConnectionState(() => connectionStateStore.recordSession(session, connection));
+            return {
+              content: [{ type: "text" as const, text: formatConnectionSession(session) }],
+              details: { ok: true, session, connection, statePath: connectionStateStore.path },
+            };
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            return {
+              content: [{ type: "text" as const, text: `Failed to accept Hub connection offer: ${msg}` }],
+              details: { ok: false, error: msg },
+            };
+          }
+        },
+      });
+
+      api.registerTool({
+        name: "openclaw_connection_get_session",
+        description: "Fetch a Hub connection session and return protocol-neutral peer connection materials.",
+        label: "OpenClaw Get Connection Session",
+        parameters: {
+          type: "object" as const,
+          required: ["sessionId"],
+          properties: {
+            sessionId: {
+              type: "number" as const,
+              description: "Hub connection session id",
+            },
+          },
+        },
+        async execute(toolCallId, params) {
+          const input = asObject(params);
+          const sessionId = asPositiveInteger(input.sessionId);
+          if (!sessionId) {
+            return {
+              content: [{ type: "text" as const, text: "sessionId must be a positive integer" }],
+              details: { ok: false, error: "session_id_required" },
+            };
+          }
+          try {
+            const client = HubConnectionRequestClient.createFromRegistration();
+            const session = await client.getSession(sessionId);
+            const connection = buildConnectionSessionView(session);
+            safeRecordConnectionState(() => connectionStateStore.recordSession(session, connection));
+            return {
+              content: [{ type: "text" as const, text: formatConnectionSession(session) }],
+              details: { ok: true, session, connection, statePath: connectionStateStore.path },
+            };
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            return {
+              content: [{ type: "text" as const, text: `Failed to get Hub connection session: ${msg}` }],
+              details: { ok: false, error: msg },
+            };
+          }
+        },
+      });
+
+      api.registerTool({
+        name: "openclaw_connection_state",
+        description: "Show locally cached Hub connection requests, offers, and sessions created or accepted by this plugin.",
+        label: "OpenClaw Connection State",
+        parameters: {
+          type: "object" as const,
+          properties: {},
+        },
+        async execute(toolCallId, params) {
+          const state = connectionStateStore.snapshot();
+          return {
+            content: [{ type: "text" as const, text: formatConnectionState(state) }],
+            details: { ok: true, state, statePath: connectionStateStore.path },
+          };
+        },
+      });
 
       const profileUpdateParameters = {
         type: "object" as const,
